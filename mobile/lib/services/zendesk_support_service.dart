@@ -1067,4 +1067,177 @@ class ZendeskSupportService {
       return false;
     }
   }
+
+  // ==========================================================================
+  // Feature Requests
+  // ==========================================================================
+
+  /// Create a feature request ticket
+  ///
+  /// Custom field IDs (configured in Zendesk):
+  /// - 15081095878799: ticket_form_id (Feature Request form)
+  /// - 15081108558863: How would this be useful for you?
+  /// - 15081142424847: When would you use this?
+  static Future<bool> createFeatureRequest({
+    required String subject,
+    required String description,
+    String? usefulness,
+    String? whenToUse,
+    String? userPubkey,
+  }) async {
+    Log.info(
+      '💡 Creating Zendesk feature request',
+      category: LogCategory.system,
+    );
+
+    // Build ticket description
+    final buffer = StringBuffer();
+    buffer.writeln('## Feature Request');
+    buffer.writeln('');
+    buffer.writeln('### What would you like?');
+    buffer.writeln(description);
+    if (usefulness != null && usefulness.isNotEmpty) {
+      buffer.writeln('');
+      buffer.writeln('### How would this be useful for you?');
+      buffer.writeln(usefulness);
+    }
+    if (whenToUse != null && whenToUse.isNotEmpty) {
+      buffer.writeln('');
+      buffer.writeln('### When would you use this?');
+      buffer.writeln(whenToUse);
+    }
+    final effectivePubkey = userPubkey ?? _userNpub;
+    if (effectivePubkey != null) {
+      buffer.writeln('');
+      buffer.writeln('**User Pubkey:** $effectivePubkey');
+    }
+
+    final effectiveSubject =
+        subject.isNotEmpty ? subject : 'Feature Request';
+    final tags = ['feature_request', 'divine_app', 'mobile'];
+
+    // Build custom fields list
+    final customFields = <Map<String, dynamic>>[];
+    if (usefulness != null && usefulness.isNotEmpty) {
+      customFields.add({
+        'id': 15081108558863,
+        'value': usefulness,
+      }); // How would this be useful for you?
+    }
+    if (whenToUse != null && whenToUse.isNotEmpty) {
+      customFields.add({
+        'id': 15081142424847,
+        'value': whenToUse,
+      }); // When would you use this?
+    }
+
+    // Try native SDK first (iOS/Android) - this links tickets to user identity
+    if (_initialized) {
+      Log.info(
+        '💡 Using native SDK for feature request (enables View Past Messages)',
+        category: LogCategory.system,
+      );
+      return createTicket(
+        subject: effectiveSubject,
+        description: buffer.toString(),
+        tags: tags,
+      );
+    }
+
+    // Fall back to REST API for desktop platforms
+    Log.info(
+      '💡 Native SDK not available, using REST API fallback',
+      category: LogCategory.system,
+    );
+    return _createFeatureRequestViaApi(
+      subject: effectiveSubject,
+      description: buffer.toString(),
+      tags: tags,
+      customFields: customFields,
+    );
+  }
+
+  /// Internal: Create feature request via REST API (fallback for desktop)
+  static Future<bool> _createFeatureRequestViaApi({
+    required String subject,
+    required String description,
+    required List<String> tags,
+    required List<Map<String, dynamic>> customFields,
+  }) async {
+    if (!ZendeskConfig.isRestApiConfigured) {
+      Log.error(
+        '❌ Zendesk REST API not configured - ZENDESK_API_TOKEN not set',
+        category: LogCategory.system,
+      );
+      return false;
+    }
+
+    try {
+      // Requester info - include external_id (npub) for JWT identity matching
+      final effectiveEmail = _userEmail ?? ZendeskConfig.apiEmail;
+      final effectiveName = _userName ?? 'Divine App User';
+
+      // Build requester with external_id for JWT identity linking
+      final requester = <String, dynamic>{
+        'name': effectiveName,
+        'email': effectiveEmail,
+      };
+      if (_userNpub != null) {
+        requester['external_id'] = _userNpub;
+      }
+
+      // Build ticket request
+      final requestBody = {
+        'ticket': {
+          'subject': subject,
+          'comment': {'body': description},
+          'requester': requester,
+          'ticket_form_id': 15081095878799, // Feature Request form
+          'tags': tags,
+          'custom_fields': customFields,
+        },
+      };
+
+      // Use Tickets API endpoint (supports custom fields)
+      final apiUrl = '${ZendeskConfig.zendeskUrl}/api/v2/tickets.json';
+
+      // Create Basic Auth header
+      final credentials =
+          '${ZendeskConfig.apiEmail}/token:${ZendeskConfig.apiToken}';
+      final encodedCredentials = base64Encode(utf8.encode(credentials));
+
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic $encodedCredentials',
+        },
+        body: jsonEncode(requestBody),
+      );
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        final ticketId = responseData['ticket']?['id'];
+        Log.info(
+          '✅ Zendesk feature request created via API: #$ticketId',
+          category: LogCategory.system,
+        );
+        return true;
+      } else {
+        Log.error(
+          'Zendesk API error: ${response.statusCode} - ${response.body}',
+          category: LogCategory.system,
+        );
+        return false;
+      }
+    } catch (e, stackTrace) {
+      Log.error(
+        'Exception creating Zendesk feature request: $e',
+        category: LogCategory.system,
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return false;
+    }
+  }
 }

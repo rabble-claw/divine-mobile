@@ -17,6 +17,7 @@ import 'package:divine_ui/divine_ui.dart';
 import 'package:openvine/utils/nostr_key_utils.dart';
 import 'package:openvine/utils/unified_logger.dart';
 import 'package:openvine/widgets/bug_report_dialog.dart';
+import 'package:openvine/widgets/feature_request_dialog.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -319,6 +320,20 @@ class _VineDrawerState extends ConsumerState<VineDrawer> {
             ),
             const SizedBox(height: 12),
             _SupportOption(
+              icon: Icons.lightbulb_outline,
+              title: 'Request a Feature',
+              subtitle: 'Suggest improvements or new features',
+              onTap: () {
+                dialogContext.pop();
+                _handleFeatureRequest(
+                  context,
+                  userPubkey,
+                  isZendeskAvailable,
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            _SupportOption(
               icon: Icons.chat,
               title: 'View Past Messages',
               subtitle: 'Check responses from support',
@@ -453,6 +468,30 @@ class _VineDrawerState extends ConsumerState<VineDrawer> {
       builder: (context) => BugReportDialog(
         bugReportService: bugReportService,
         currentScreen: 'VineDrawer',
+        userPubkey: userPubkey,
+      ),
+    );
+  }
+
+  /// Handle feature request submission
+  /// Uses JWT identity for SDK ticket creation (enables View Past Messages)
+  Future<void> _handleFeatureRequest(
+    BuildContext context,
+    String? userPubkey,
+    bool isZendeskAvailable,
+  ) async {
+    // Set JWT identity for SDK ticket creation (Zendesk configured for JWT auth)
+    // Don't set anonymous identity first - causes auth type mismatch
+    if (userPubkey != null) {
+      final npub = NostrKeyUtils.encodePubKey(userPubkey);
+      await ZendeskSupportService.setJwtIdentity(npub);
+    }
+
+    Log.debug('💡 Opening feature request dialog', category: LogCategory.ui);
+    if (!context.mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => FeatureRequestDialog(
         userPubkey: userPubkey,
       ),
     );
