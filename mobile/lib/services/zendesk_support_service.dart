@@ -25,7 +25,6 @@ class ZendeskSupportService {
 
   /// JWT authentication state (for native SDK ticket history)
   static String? _cachedJwt;
-  static int? _jwtExpiresAt;
 
   /// Initialize Zendesk SDK
   ///
@@ -173,7 +172,6 @@ class ZendeskSupportService {
     _userEmail = null;
     _userNpub = null;
     _cachedJwt = null;
-    _jwtExpiresAt = null;
 
     if (_initialized) {
       try {
@@ -252,7 +250,6 @@ class ZendeskSupportService {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (data['success'] == true && data['jwt'] != null) {
           _cachedJwt = data['jwt'] as String;
-          _jwtExpiresAt = data['expires_at'] as int?;
           Log.info(
             '✅ Zendesk JWT: Fetched successfully',
             category: LogCategory.system,
@@ -350,7 +347,6 @@ class ZendeskSupportService {
   /// Clear cached JWT (call on logout)
   static void clearJwtCache() {
     _cachedJwt = null;
-    _jwtExpiresAt = null;
   }
 
   /// Format npub for display
