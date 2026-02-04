@@ -13,6 +13,7 @@
 #   - ZENDESK_APP_ID
 #   - ZENDESK_CLIENT_ID
 #   - ZENDESK_URL
+#   - RELAY_MANAGER_URL
 
 definitions:
   environment:
@@ -40,7 +41,8 @@ definitions:
         flutter build apk --release --build-number=$PROJECT_BUILD_NUMBER \
           --dart-define=ZENDESK_APP_ID=$ZENDESK_APP_ID \
           --dart-define=ZENDESK_CLIENT_ID=$ZENDESK_CLIENT_ID \
-          --dart-define=ZENDESK_URL=$ZENDESK_URL
+          --dart-define=ZENDESK_URL=$ZENDESK_URL \
+          --dart-define=RELAY_MANAGER_URL=$RELAY_MANAGER_URL
     - &build_aab
       name: Build Android AAB
       script: |
@@ -49,7 +51,8 @@ definitions:
         flutter build appbundle --release --build-number=$BUILD_NUMBER \
           --dart-define=ZENDESK_APP_ID=$ZENDESK_APP_ID \
           --dart-define=ZENDESK_CLIENT_ID=$ZENDESK_CLIENT_ID \
-          --dart-define=ZENDESK_URL=$ZENDESK_URL
+          --dart-define=ZENDESK_URL=$ZENDESK_URL \
+          --dart-define=RELAY_MANAGER_URL=$RELAY_MANAGER_URL
     - &build_ios
       name: Build and sign iOS
       script: |
@@ -59,6 +62,7 @@ definitions:
           --dart-define=ZENDESK_APP_ID=$ZENDESK_APP_ID \
           --dart-define=ZENDESK_CLIENT_ID=$ZENDESK_CLIENT_ID \
           --dart-define=ZENDESK_URL=$ZENDESK_URL \
+          --dart-define=RELAY_MANAGER_URL=$RELAY_MANAGER_URL \
           --export-options-plist=/Users/builder/export_options.plist
     - &build_ios_simulator
       name: Build iOS Simulator app
@@ -66,7 +70,8 @@ definitions:
         flutter build ios --simulator \
           --dart-define=ZENDESK_APP_ID=$ZENDESK_APP_ID \
           --dart-define=ZENDESK_CLIENT_ID=$ZENDESK_CLIENT_ID \
-          --dart-define=ZENDESK_URL=$ZENDESK_URL
+          --dart-define=ZENDESK_URL=$ZENDESK_URL \
+          --dart-define=RELAY_MANAGER_URL=$RELAY_MANAGER_URL
 workflows:
   ios-build:
     name: iOS Build

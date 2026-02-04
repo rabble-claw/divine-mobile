@@ -43,4 +43,14 @@ class ZendeskConfig {
 
   /// Check if REST API is configured
   static bool get isRestApiConfigured => apiToken.isNotEmpty;
+
+  /// Relay Manager URL for JWT authentication endpoint
+  /// Set via: --dart-define=RELAY_MANAGER_URL=xxx
+  static const String relayManagerUrl = String.fromEnvironment(
+    'RELAY_MANAGER_URL',
+    defaultValue: '',
+  );
+
+  /// Check if JWT authentication is available
+  static bool get isJwtAvailable => relayManagerUrl.isNotEmpty;
 }

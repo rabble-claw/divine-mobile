@@ -1,10 +1,13 @@
-// ABOUTME: Dialog widget for submitting bug reports via email
-// ABOUTME: Collects user description, gathers diagnostics, and opens pre-filled email
+// ABOUTME: Dialog widget for submitting bug reports to Zendesk
+// ABOUTME: Collects structured data (subject, description, steps, expected behavior)
+// ABOUTME: Submits directly to Zendesk REST API with custom fields
 
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:openvine/models/log_entry.dart';
 import 'package:openvine/services/bug_report_service.dart';
+import 'package:openvine/services/zendesk_support_service.dart';
 import 'package:divine_ui/divine_ui.dart';
 import 'package:openvine/utils/unified_logger.dart';
 
@@ -28,7 +31,10 @@ class BugReportDialog extends StatefulWidget {
 }
 
 class _BugReportDialogState extends State<BugReportDialog> {
+  final _subjectController = TextEditingController(text: 'Bug Report: ');
   final _descriptionController = TextEditingController();
+  final _stepsController = TextEditingController();
+  final _expectedController = TextEditingController();
   bool _isSubmitting = false;
   String? _resultMessage;
   bool? _isSuccess;
@@ -39,11 +45,15 @@ class _BugReportDialogState extends State<BugReportDialog> {
   void dispose() {
     _isDisposed = true;
     _closeTimer?.cancel();
+    _subjectController.dispose();
     _descriptionController.dispose();
+    _stepsController.dispose();
+    _expectedController.dispose();
     super.dispose();
   }
 
-  bool get _canSubmit => !_isSubmitting;
+  bool get _canSubmit =>
+      !_isSubmitting && _descriptionController.text.trim().isNotEmpty;
 
   Future<void> _submitReport() async {
     if (!_canSubmit) return;
@@ -55,33 +65,44 @@ class _BugReportDialogState extends State<BugReportDialog> {
     });
 
     try {
-      // Collect diagnostics
+      // Collect diagnostics for device info
       final description = _descriptionController.text.trim();
       final reportData = await widget.bugReportService.collectDiagnostics(
-        userDescription: description.isEmpty
-            ? 'User reported an issue (no description provided)'
-            : description,
+        userDescription: description,
         currentScreen: widget.currentScreen,
         userPubkey: widget.userPubkey,
       );
 
-      // Send bug report to Worker API
-      final result = await widget.bugReportService.sendBugReport(reportData);
+      // Submit directly to Zendesk REST API with structured fields
+      final success = await ZendeskSupportService.createStructuredBugReport(
+        subject: _subjectController.text.trim(),
+        description: description,
+        stepsToReproduce: _stepsController.text.trim(),
+        expectedBehavior: _expectedController.text.trim(),
+        reportId: reportData.reportId,
+        appVersion: reportData.appVersion,
+        deviceInfo: reportData.deviceInfo,
+        currentScreen: widget.currentScreen,
+        userPubkey: widget.userPubkey,
+        errorCounts: reportData.errorCounts,
+        logsSummary: _buildLogsSummary(reportData.recentLogs),
+      );
 
       if (!_isDisposed && mounted) {
         setState(() {
           _isSubmitting = false;
-          _isSuccess = result.success;
-          if (result.success) {
+          _isSuccess = success;
+          if (success) {
             _resultMessage =
                 "Thank you! We've received your report and will use it to make Divine better.";
           } else {
-            _resultMessage = 'Failed to send bug report: ${result.error}';
+            _resultMessage =
+                'Failed to send bug report. Please try again later.';
           }
         });
 
         // Close dialog after delay if successful
-        if (result.success) {
+        if (success) {
           _closeTimer = Timer(const Duration(milliseconds: 1500), () {
             if (!_isDisposed && mounted) {
               context.pop();
@@ -107,6 +128,36 @@ class _BugReportDialogState extends State<BugReportDialog> {
     }
   }
 
+  String? _buildLogsSummary(List<LogEntry> logs) {
+    if (logs.isEmpty) return null;
+    final recentLines = logs.take(50).map((log) => log.toFormattedString());
+    return recentLines.join('\n');
+  }
+
+  InputDecoration _buildInputDecoration({
+    required String label,
+    required String hint,
+    String? helper,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: Colors.grey.shade400),
+      hintText: hint,
+      hintStyle: TextStyle(color: Colors.grey.shade600),
+      helperText: helper,
+      helperStyle: TextStyle(color: Colors.grey.shade600),
+      border: const OutlineInputBorder(
+        borderSide: BorderSide(color: Colors.grey),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderSide: BorderSide(color: Colors.grey.shade700),
+      ),
+      focusedBorder: const OutlineInputBorder(
+        borderSide: BorderSide(color: VineTheme.vineGreen),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -122,29 +173,74 @@ class _BugReportDialogState extends State<BugReportDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Description field
+              // Subject field
               TextField(
-                controller: _descriptionController,
-                maxLines: 5,
+                controller: _subjectController,
+                maxLines: 1,
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
-                decoration: InputDecoration(
-                  hintText: 'Describe the issue (optional)...',
-                  hintStyle: TextStyle(color: Colors.grey.shade600),
-                  border: const OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.grey),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.grey.shade700),
-                  ),
-                  focusedBorder: const OutlineInputBorder(
-                    borderSide: BorderSide(color: VineTheme.vineGreen),
-                  ),
-                  helperText: 'Diagnostic info will be sent automatically',
-                  helperStyle: TextStyle(color: Colors.grey.shade600),
+                decoration: _buildInputDecoration(
+                  label: 'Subject',
+                  hint: 'Brief summary of the issue',
                 ),
-                onChanged: (_) =>
-                    setState(() {}), // Rebuild to update button state
+                onChanged: (_) => setState(() {}),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Description field (required)
+              TextField(
+                controller: _descriptionController,
+                maxLines: 3,
+                enabled: !_isSubmitting,
+                style: const TextStyle(color: VineTheme.whiteText),
+                decoration: _buildInputDecoration(
+                  label: 'What happened? *',
+                  hint: 'Describe the issue you encountered',
+                  helper: 'Required',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Steps to reproduce field
+              TextField(
+                controller: _stepsController,
+                maxLines: 3,
+                enabled: !_isSubmitting,
+                style: const TextStyle(color: VineTheme.whiteText),
+                decoration: _buildInputDecoration(
+                  label: 'Steps to Reproduce',
+                  hint: '1. Go to...\n2. Tap on...\n3. See error',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Expected behavior field
+              TextField(
+                controller: _expectedController,
+                maxLines: 2,
+                enabled: !_isSubmitting,
+                style: const TextStyle(color: VineTheme.whiteText),
+                decoration: _buildInputDecoration(
+                  label: 'Expected Behavior',
+                  hint: 'What should have happened instead?',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+
+              const SizedBox(height: 8),
+
+              // Info text
+              Text(
+                'Device info and logs will be included automatically.',
+                style: TextStyle(
+                  color: Colors.grey.shade500,
+                  fontSize: 12,
+                ),
               ),
 
               const SizedBox(height: 16),

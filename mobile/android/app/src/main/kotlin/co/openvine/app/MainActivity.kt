@@ -13,12 +13,14 @@ import java.io.File
 import zendesk.core.Zendesk
 import zendesk.core.Identity
 import zendesk.core.AnonymousIdentity
+import zendesk.core.JwtIdentity
 import zendesk.support.Support
 import zendesk.support.requestlist.RequestListActivity
 import zendesk.support.request.RequestActivity
 import zendesk.support.RequestProvider
 import zendesk.support.CreateRequest
 import zendesk.support.Request
+import zendesk.support.CustomField
 import com.zendesk.service.ZendeskCallback
 import com.zendesk.service.ErrorResponse
 
@@ -342,6 +344,30 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "setJwtIdentity" -> {
+                    val args = call.arguments as? Map<*, *>
+                    val userToken = args?.get("userToken") as? String
+
+                    if (userToken == null) {
+                        result.error("INVALID_ARGUMENT", "userToken is required", null)
+                        return@setMethodCallHandler
+                    }
+
+                    try {
+                        Log.d(ZENDESK_TAG, "Setting JWT identity with user token: ${userToken.take(20)}...")
+
+                        // Pass user token (npub) to SDK - Zendesk will call our JWT endpoint to get the actual JWT
+                        val identity: Identity = JwtIdentity(userToken)
+                        Zendesk.INSTANCE.setIdentity(identity)
+
+                        Log.d(ZENDESK_TAG, "JWT identity set - Zendesk will callback to get JWT")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(ZENDESK_TAG, "Failed to set JWT identity", e)
+                        result.error("SET_JWT_IDENTITY_FAILED", e.message, null)
+                    }
+                }
+
                 "setAnonymousIdentity" -> {
                     try {
                         Log.d(ZENDESK_TAG, "Setting anonymous identity")
@@ -363,6 +389,8 @@ class MainActivity : FlutterActivity() {
                     val subject = args?.get("subject") as? String
                     val description = args?.get("description") as? String
                     val tags = (args?.get("tags") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                    val ticketFormId = (args?.get("ticketFormId") as? Number)?.toLong()
+                    val customFieldsData = (args?.get("customFields") as? List<*>)?.filterIsInstance<Map<*, *>>() ?: emptyList()
 
                     if (subject == null || description == null) {
                         result.error("INVALID_ARGUMENT", "subject and description are required", null)
@@ -383,6 +411,25 @@ class MainActivity : FlutterActivity() {
                         createRequest.subject = subject
                         createRequest.description = description
                         createRequest.tags = tags
+
+                        // Set ticket form ID if provided
+                        if (ticketFormId != null) {
+                            createRequest.ticketFormId = ticketFormId
+                            Log.d(ZENDESK_TAG, "Using ticket form ID: $ticketFormId")
+                        }
+
+                        // Set custom fields if provided
+                        if (customFieldsData.isNotEmpty()) {
+                            val customFields = customFieldsData.mapNotNull { fieldData ->
+                                val fieldId = (fieldData["id"] as? Number)?.toLong()
+                                val fieldValue = fieldData["value"]
+                                if (fieldId != null && fieldValue != null) {
+                                    Log.d(ZENDESK_TAG, "Custom field $fieldId = $fieldValue")
+                                    CustomField(fieldId, fieldValue.toString())
+                                } else null
+                            }
+                            createRequest.customFields = customFields
+                        }
 
                         provider.createRequest(createRequest, object : ZendeskCallback<Request>() {
                             override fun onSuccess(request: Request?) {

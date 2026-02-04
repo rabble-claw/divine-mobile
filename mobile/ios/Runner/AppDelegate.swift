@@ -268,6 +268,26 @@ import SupportProvidersSDK
         NSLog("✅ Zendesk: User identity cleared")
         result(true)
 
+      case "setJwtIdentity":
+        guard let args = call.arguments as? [String: Any],
+              let userToken = args["userToken"] as? String else {
+          result(FlutterError(
+            code: "INVALID_ARGUMENT",
+            message: "userToken is required",
+            details: nil
+          ))
+          return
+        }
+
+        NSLog("🎫 Zendesk: Setting JWT identity with user token: \(userToken.prefix(20))...")
+
+        // Pass user token (npub) to SDK - Zendesk will call our JWT endpoint to get the actual JWT
+        let identity = Identity.createJwt(token: userToken)
+        Zendesk.instance?.setIdentity(identity)
+
+        NSLog("✅ Zendesk: JWT identity set - Zendesk will callback to get JWT")
+        result(true)
+
       case "setAnonymousIdentity":
         NSLog("🎫 Zendesk: Setting anonymous identity")
 
@@ -293,12 +313,35 @@ import SupportProvidersSDK
         }
 
         let tags = args["tags"] as? [String] ?? []
+        let ticketFormId = args["ticketFormId"] as? NSNumber
+        let customFieldsData = args["customFields"] as? [[String: Any]] ?? []
 
         // Build create request object using ZDK API
         let createRequest = ZDKCreateRequest()
         createRequest.subject = subject
         createRequest.requestDescription = description
         createRequest.tags = tags
+
+        // Set ticket form ID if provided
+        if let formId = ticketFormId {
+          createRequest.ticketFormId = formId
+          NSLog("🎫 Zendesk: Using ticket form ID: \(formId)")
+        }
+
+        // Set custom fields if provided
+        if !customFieldsData.isEmpty {
+          var customFields: [CustomField] = []
+          for fieldData in customFieldsData {
+            if let fieldId = fieldData["id"] as? NSNumber,
+               let fieldValue = fieldData["value"] {
+              // CustomField uses dictionary-based initializer in modern SDK
+              let customField = CustomField(dictionary: ["id": fieldId, "value": fieldValue])
+              customFields.append(customField)
+              NSLog("🎫 Zendesk: Custom field \(fieldId) = \(fieldValue)")
+            }
+          }
+          createRequest.customFields = customFields
+        }
 
         NSLog("🎫 Zendesk: Submitting ticket - subject: '\(subject)', tags: \(tags)")
 
@@ -307,13 +350,17 @@ import SupportProvidersSDK
           DispatchQueue.main.async {
             if let error = error {
               NSLog("❌ Zendesk: Failed to create ticket - \(error.localizedDescription)")
-              result(false)
+              result(FlutterError(code: "CREATE_FAILED",
+                                message: error.localizedDescription,
+                                details: nil))
             } else if let request = request as? ZDKRequest {
               NSLog("✅ Zendesk: Ticket created successfully - ID: \(request.requestId)")
               result(true)
             } else {
               NSLog("⚠️ Zendesk: Unknown result when creating ticket")
-              result(false)
+              result(FlutterError(code: "UNKNOWN_RESULT",
+                                message: "Request returned but no ticket or error",
+                                details: nil))
             }
           }
         }
