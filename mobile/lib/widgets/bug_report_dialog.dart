@@ -242,10 +242,7 @@ class _BugReportDialogState extends State<BugReportDialog> {
               // Info text
               Text(
                 'Device info and logs will be included automatically.',
-                style: TextStyle(
-                  color: Colors.grey.shade500,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
               ),
 
               const SizedBox(height: 16),

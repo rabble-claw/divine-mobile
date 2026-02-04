@@ -698,7 +698,8 @@ class ZendeskSupportService {
     // Extract platform info for custom fields
     final platform =
         deviceInfo['platform']?.toString().toLowerCase() ?? 'unknown';
-    final osVersion = deviceInfo['version']?.toString() ??
+    final osVersion =
+        deviceInfo['version']?.toString() ??
         deviceInfo['systemVersion']?.toString() ??
         'unknown';
     // appVersion format is "1.2.3+456" - extract build number after +
@@ -754,8 +755,9 @@ class ZendeskSupportService {
       buffer.writeln('```');
     }
 
-    final effectiveSubject =
-        subject.isNotEmpty ? subject : 'Bug Report: $reportId';
+    final effectiveSubject = subject.isNotEmpty
+        ? subject
+        : 'Bug Report: $reportId';
     final tags = ['bug_report', 'divine_app', 'mobile', platform];
 
     // Build custom fields list for SDK
@@ -935,8 +937,10 @@ class ZendeskSupportService {
       );
 
       // Extract platform info for custom fields
-      final platform = deviceInfo['platform']?.toString().toLowerCase() ?? 'unknown';
-      final osVersion = deviceInfo['version']?.toString() ??
+      final platform =
+          deviceInfo['platform']?.toString().toLowerCase() ?? 'unknown';
+      final osVersion =
+          deviceInfo['version']?.toString() ??
           deviceInfo['systemVersion']?.toString() ??
           'unknown';
       // appVersion format is "1.2.3+456" - extract build number after +
@@ -1100,8 +1104,7 @@ class ZendeskSupportService {
       buffer.writeln('**User Pubkey:** $effectivePubkey');
     }
 
-    final effectiveSubject =
-        subject.isNotEmpty ? subject : 'Feature Request';
+    final effectiveSubject = subject.isNotEmpty ? subject : 'Feature Request';
     final tags = ['feature_request', 'divine_app', 'mobile'];
 
     // Build custom fields list

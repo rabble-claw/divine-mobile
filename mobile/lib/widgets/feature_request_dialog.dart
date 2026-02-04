@@ -11,10 +11,7 @@ import 'package:openvine/utils/unified_logger.dart';
 
 /// Dialog for collecting and submitting feature requests
 class FeatureRequestDialog extends StatefulWidget {
-  const FeatureRequestDialog({
-    super.key,
-    this.userPubkey,
-  });
+  const FeatureRequestDialog({super.key, this.userPubkey});
 
   final String? userPubkey;
 
