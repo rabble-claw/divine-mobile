@@ -23,7 +23,7 @@ class FeatureRequestDialog extends StatefulWidget {
 }
 
 class _FeatureRequestDialogState extends State<FeatureRequestDialog> {
-  final _subjectController = TextEditingController(text: 'Feature Request: ');
+  final _subjectController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _usefulnessController = TextEditingController();
   final _whenToUseController = TextEditingController();
@@ -45,7 +45,9 @@ class _FeatureRequestDialogState extends State<FeatureRequestDialog> {
   }
 
   bool get _canSubmit =>
-      !_isSubmitting && _descriptionController.text.trim().isNotEmpty;
+      !_isSubmitting &&
+      _subjectController.text.trim().isNotEmpty &&
+      _descriptionController.text.trim().isNotEmpty;
 
   Future<void> _submitRequest() async {
     if (!_canSubmit) return;
@@ -58,8 +60,10 @@ class _FeatureRequestDialogState extends State<FeatureRequestDialog> {
 
     try {
       // Submit feature request to Zendesk
+      // Prefix subject with "feat:" for ticket categorization
+      final subject = 'feat: ${_subjectController.text.trim()}';
       final success = await ZendeskSupportService.createFeatureRequest(
-        subject: _subjectController.text.trim(),
+        subject: subject,
         description: _descriptionController.text.trim(),
         usefulness: _usefulnessController.text.trim(),
         whenToUse: _whenToUseController.text.trim(),
@@ -145,15 +149,16 @@ class _FeatureRequestDialogState extends State<FeatureRequestDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Subject field
+              // Subject field (required)
               TextField(
                 controller: _subjectController,
                 maxLines: 1,
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
                 decoration: _buildInputDecoration(
-                  label: 'Subject',
+                  label: 'Subject *',
                   hint: 'Brief summary of your idea',
+                  helper: 'Required',
                 ),
                 onChanged: (_) => setState(() {}),
               ),
@@ -183,7 +188,7 @@ class _FeatureRequestDialogState extends State<FeatureRequestDialog> {
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
                 decoration: _buildInputDecoration(
-                  label: 'How would this be useful for you?',
+                  label: 'How would this be useful?',
                   hint: 'Explain the benefit this feature would provide',
                 ),
                 onChanged: (_) => setState(() {}),
