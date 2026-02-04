@@ -27,14 +27,6 @@ class ZendeskSupportService {
   static String? _cachedJwt;
   static int? _jwtExpiresAt;
 
-  /// Check if we have a valid (non-expired) JWT cached
-  static bool get _hasValidJwt {
-    if (_cachedJwt == null || _jwtExpiresAt == null) return false;
-    // Consider expired if less than 5 minutes remaining
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    return _jwtExpiresAt! > (now + 300);
-  }
-
   /// Initialize Zendesk SDK
   ///
   /// Call once at app startup. Returns true if initialization successful.
