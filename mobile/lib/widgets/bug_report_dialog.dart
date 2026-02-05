@@ -10,6 +10,7 @@ import 'package:openvine/services/bug_report_service.dart';
 import 'package:openvine/services/zendesk_support_service.dart';
 import 'package:divine_ui/divine_ui.dart';
 import 'package:openvine/utils/unified_logger.dart';
+import 'package:openvine/widgets/support_dialog_utils.dart';
 
 /// Dialog for collecting and submitting bug reports
 class BugReportDialog extends StatefulWidget {
@@ -138,30 +139,6 @@ class _BugReportDialogState extends State<BugReportDialog> {
     return recentLines.join('\n');
   }
 
-  InputDecoration _buildInputDecoration({
-    required String label,
-    required String hint,
-    String? helper,
-  }) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: TextStyle(color: Colors.grey.shade400),
-      hintText: hint,
-      hintStyle: TextStyle(color: Colors.grey.shade600),
-      helperText: helper,
-      helperStyle: TextStyle(color: Colors.grey.shade600),
-      border: const OutlineInputBorder(
-        borderSide: BorderSide(color: Colors.grey),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderSide: BorderSide(color: Colors.grey.shade700),
-      ),
-      focusedBorder: const OutlineInputBorder(
-        borderSide: BorderSide(color: VineTheme.vineGreen),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -183,7 +160,7 @@ class _BugReportDialogState extends State<BugReportDialog> {
                 maxLines: 1,
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
-                decoration: _buildInputDecoration(
+                decoration: buildSupportInputDecoration(
                   label: 'Subject *',
                   hint: 'Brief summary of the issue',
                   helper: 'Required',
@@ -199,7 +176,7 @@ class _BugReportDialogState extends State<BugReportDialog> {
                 maxLines: 3,
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
-                decoration: _buildInputDecoration(
+                decoration: buildSupportInputDecoration(
                   label: 'What happened? *',
                   hint: 'Describe the issue you encountered',
                   helper: 'Required',
@@ -215,7 +192,7 @@ class _BugReportDialogState extends State<BugReportDialog> {
                 maxLines: 3,
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
-                decoration: _buildInputDecoration(
+                decoration: buildSupportInputDecoration(
                   label: 'Steps to Reproduce',
                   hint: '1. Go to...\n2. Tap on...\n3. See error',
                 ),
@@ -230,7 +207,7 @@ class _BugReportDialogState extends State<BugReportDialog> {
                 maxLines: 2,
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
-                decoration: _buildInputDecoration(
+                decoration: buildSupportInputDecoration(
                   label: 'Expected Behavior',
                   hint: 'What should have happened instead?',
                 ),

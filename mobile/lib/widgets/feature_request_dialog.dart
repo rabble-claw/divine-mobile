@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:openvine/services/zendesk_support_service.dart';
 import 'package:divine_ui/divine_ui.dart';
 import 'package:openvine/utils/unified_logger.dart';
+import 'package:openvine/widgets/support_dialog_utils.dart';
 
 /// Dialog for collecting and submitting feature requests
 class FeatureRequestDialog extends StatefulWidget {
@@ -107,30 +108,6 @@ class _FeatureRequestDialogState extends State<FeatureRequestDialog> {
     }
   }
 
-  InputDecoration _buildInputDecoration({
-    required String label,
-    required String hint,
-    String? helper,
-  }) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: TextStyle(color: Colors.grey.shade400),
-      hintText: hint,
-      hintStyle: TextStyle(color: Colors.grey.shade600),
-      helperText: helper,
-      helperStyle: TextStyle(color: Colors.grey.shade600),
-      border: const OutlineInputBorder(
-        borderSide: BorderSide(color: Colors.grey),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderSide: BorderSide(color: Colors.grey.shade700),
-      ),
-      focusedBorder: const OutlineInputBorder(
-        borderSide: BorderSide(color: VineTheme.vineGreen),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -152,7 +129,7 @@ class _FeatureRequestDialogState extends State<FeatureRequestDialog> {
                 maxLines: 1,
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
-                decoration: _buildInputDecoration(
+                decoration: buildSupportInputDecoration(
                   label: 'Subject *',
                   hint: 'Brief summary of your idea',
                   helper: 'Required',
@@ -168,7 +145,7 @@ class _FeatureRequestDialogState extends State<FeatureRequestDialog> {
                 maxLines: 3,
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
-                decoration: _buildInputDecoration(
+                decoration: buildSupportInputDecoration(
                   label: 'What would you like? *',
                   hint: 'Describe the feature you want',
                   helper: 'Required',
@@ -184,7 +161,7 @@ class _FeatureRequestDialogState extends State<FeatureRequestDialog> {
                 maxLines: 3,
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
-                decoration: _buildInputDecoration(
+                decoration: buildSupportInputDecoration(
                   label: 'How would this be useful?',
                   hint: 'Explain the benefit this feature would provide',
                 ),
@@ -199,7 +176,7 @@ class _FeatureRequestDialogState extends State<FeatureRequestDialog> {
                 maxLines: 2,
                 enabled: !_isSubmitting,
                 style: const TextStyle(color: VineTheme.whiteText),
-                decoration: _buildInputDecoration(
+                decoration: buildSupportInputDecoration(
                   label: 'When would you use this?',
                   hint: 'Describe the situations where this would help',
                 ),
