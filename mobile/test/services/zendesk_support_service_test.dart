@@ -471,11 +471,12 @@ void main() {
     });
 
     test(
-      'createBugReportTicketViaApi returns false when API not configured',
+      'createStructuredBugReport returns false when API not configured',
       () async {
-        final result = await ZendeskSupportService.createBugReportTicketViaApi(
+        final result = await ZendeskSupportService.createStructuredBugReport(
+          subject: 'Test bug',
+          description: 'Test bug description',
           reportId: 'test-123',
-          userDescription: 'Test bug',
           appVersion: '1.0.0',
           deviceInfo: {'platform': 'test'},
         );

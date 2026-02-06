@@ -476,10 +476,7 @@ class ZendeskSupportService {
   static bool get isRestApiAvailable => ZendeskConfig.isRestApiConfigured;
 
   /// Build requester object with optional external_id for JWT identity linking
-  static Map<String, dynamic> _buildRequester({
-    String? name,
-    String? email,
-  }) {
+  static Map<String, dynamic> _buildRequester({String? name, String? email}) {
     final requester = <String, dynamic>{
       'name': name ?? _userName ?? 'Divine App User',
       'email': email ?? _userEmail ?? ZendeskConfig.apiEmail,

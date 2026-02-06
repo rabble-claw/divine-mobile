@@ -117,7 +117,7 @@ void main() {
         ),
       ).thenAnswer((_) async => testReportData);
 
-      when(mockBugReportService.sendBugReport(any)).thenAnswer(
+      when(mockBugReportService.sendBugReportToRecipient(any, any)).thenAnswer(
         (_) async => BugReportResult(
           success: true,
           reportId: 'test-123',
@@ -151,7 +151,7 @@ void main() {
         ),
       ).called(1);
 
-      verify(mockBugReportService.sendBugReport(any)).called(1);
+      verify(mockBugReportService.sendBugReportToRecipient(any, any)).called(1);
     });
 
     testWidgets('should show loading indicator while submitting', (
@@ -178,7 +178,9 @@ void main() {
         );
       });
 
-      when(mockBugReportService.sendBugReport(any)).thenAnswer((_) async {
+      when(mockBugReportService.sendBugReportToRecipient(any, any)).thenAnswer((
+        _,
+      ) async {
         await Future.delayed(const Duration(milliseconds: 100));
         return BugReportResult.success(
           reportId: 'test-123',
@@ -228,7 +230,9 @@ void main() {
           ),
         );
 
-        when(mockBugReportService.sendBugReport(any)).thenAnswer(
+        when(
+          mockBugReportService.sendBugReportToRecipient(any, any),
+        ).thenAnswer(
           (_) async => BugReportResult(
             success: true,
             reportId: 'test-123',
@@ -282,7 +286,7 @@ void main() {
         ),
       );
 
-      when(mockBugReportService.sendBugReport(any)).thenAnswer(
+      when(mockBugReportService.sendBugReportToRecipient(any, any)).thenAnswer(
         (_) async => BugReportResult(
           success: true,
           reportId: 'test-123',
@@ -355,7 +359,9 @@ void main() {
           ),
         );
 
-        when(mockBugReportService.sendBugReport(any)).thenAnswer(
+        when(
+          mockBugReportService.sendBugReportToRecipient(any, any),
+        ).thenAnswer(
           (_) async => BugReportResult(
             success: true,
             reportId: 'test-123',
@@ -411,7 +417,7 @@ void main() {
         ),
       );
 
-      when(mockBugReportService.sendBugReport(any)).thenAnswer(
+      when(mockBugReportService.sendBugReportToRecipient(any, any)).thenAnswer(
         (_) async => BugReportResult.failure(
           'Could not create file',
           reportId: 'test-123',
