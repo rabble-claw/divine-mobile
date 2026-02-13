@@ -16,8 +16,6 @@ import 'package:openvine/screens/discover_lists_screen.dart';
 import 'package:openvine/screens/hashtag_feed_screen.dart';
 import 'package:openvine/screens/pure/explore_video_screen_pure.dart';
 import 'package:openvine/screens/user_list_people_screen.dart';
-import 'package:openvine/services/error_analytics_tracker.dart';
-import 'package:openvine/services/feed_performance_tracker.dart';
 import 'package:openvine/services/screen_analytics_service.dart';
 import 'package:openvine/services/top_hashtags_service.dart';
 import 'package:divine_ui/divine_ui.dart';
@@ -67,8 +65,6 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen>
 
   // Analytics services
   final _screenAnalytics = ScreenAnalyticsService();
-  final _feedTracker = FeedPerformanceTracker();
-  final _errorTracker = ErrorAnalyticsTracker();
 
   /// Calculate tab count based on feature availability
   /// Base: New Videos, Trending, Lists = 3
@@ -497,16 +493,8 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen>
               controller: _tabController,
               children: [
                 if (_classicsAvailable) const ClassicVinesTab(),
-                NewVideosTab(
-                  screenAnalytics: _screenAnalytics,
-                  feedTracker: _feedTracker,
-                  errorTracker: _errorTracker,
-                ),
-                PopularVideosTab(
-                  screenAnalytics: _screenAnalytics,
-                  feedTracker: _feedTracker,
-                  errorTracker: _errorTracker,
-                ),
+                const NewVideosTab(),
+                const PopularVideosTab(),
                 if (_forYouAvailable) const ForYouTab(),
                 _buildListsTab(),
               ],

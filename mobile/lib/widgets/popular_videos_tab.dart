@@ -1,180 +1,83 @@
-// ABOUTME: Popular Videos tab widget showing trending videos sorted by loop count
-// ABOUTME: Uses REST API (sort=loops) with Nostr fallback for accurate loop-based sorting
+// ABOUTME: Popular Videos tab widget showing trending videos sorted by loops
+// ABOUTME: Uses PopularVideosFeedBloc for state management with BlocProvider
 
 import 'dart:async';
 
 import 'package:divine_ui/divine_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:models/models.dart' hide LogCategory;
-import 'package:openvine/providers/popular_videos_feed_provider.dart';
+import 'package:models/models.dart';
+import 'package:openvine/blocs/explore_feed/explore_feed_bloc.dart';
+import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/screens/feed/pooled_fullscreen_video_feed_screen.dart';
-import 'package:openvine/services/error_analytics_tracker.dart';
-import 'package:openvine/services/feed_performance_tracker.dart';
-import 'package:openvine/services/screen_analytics_service.dart';
 import 'package:openvine/services/top_hashtags_service.dart';
-import 'package:openvine/utils/unified_logger.dart';
 import 'package:openvine/widgets/branded_loading_indicator.dart';
 import 'package:openvine/widgets/composable_video_grid.dart';
+import 'package:openvine/widgets/explore_feed_analytics_listener.dart';
 import 'package:openvine/widgets/scroll_to_hide_mixin.dart';
 import 'package:openvine/widgets/trending_hashtags_section.dart';
 import 'package:rxdart/rxdart.dart';
 
 /// Tab widget displaying popular/trending videos sorted by loop count.
 ///
-/// Handles its own:
-/// - Riverpod provider watching (videoEventsProvider)
-/// - Analytics tracking (optional, for testability)
-/// - Video sorting cache
-/// - Loading/error/data states
-/// - Full screen video navigation on tap
+/// Owns its [PopularVideosFeedBloc] via [BlocProvider] and uses
+/// [AutomaticKeepAliveClientMixin] to preserve scroll position and
+/// cached videos across tab switches.
 class PopularVideosTab extends ConsumerStatefulWidget {
-  const PopularVideosTab({
-    super.key,
-    this.screenAnalytics,
-    this.feedTracker,
-    this.errorTracker,
-  });
-
-  /// Optional analytics services (for testing, defaults to singletons)
-  final ScreenAnalyticsService? screenAnalytics;
-  final FeedPerformanceTracker? feedTracker;
-  final ErrorAnalyticsTracker? errorTracker;
+  const PopularVideosTab({super.key});
 
   @override
   ConsumerState<PopularVideosTab> createState() => _PopularVideosTabState();
 }
 
-class _PopularVideosTabState extends ConsumerState<PopularVideosTab> {
-  // Analytics services - use provided or create defaults
-  late final ScreenAnalyticsService? _screenAnalytics;
-  late final FeedPerformanceTracker? _feedTracker;
-  late final ErrorAnalyticsTracker? _errorTracker;
-  DateTime? _feedLoadStartTime;
-
+class _PopularVideosTabState extends ConsumerState<PopularVideosTab>
+    with AutomaticKeepAliveClientMixin {
   @override
-  void initState() {
-    super.initState();
-    _screenAnalytics = widget.screenAnalytics;
-    _feedTracker = widget.feedTracker;
-    _errorTracker = widget.errorTracker;
-  }
+  bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
-    // Use popularVideosFeedProvider which tries REST API (sort=loops) first,
-    // then falls back to Nostr if unavailable
-    final feedAsync = ref.watch(popularVideosFeedProvider);
+    super.build(context);
+    final videosRepository = ref.read(videosRepositoryProvider);
 
-    Log.debug(
-      '🔍 PopularVideosTab: AsyncValue state - isLoading: ${feedAsync.isLoading}, '
-      'hasValue: ${feedAsync.hasValue}, hasError: ${feedAsync.hasError}',
-      name: 'PopularVideosTab',
-      category: LogCategory.video,
-    );
-
-    // Track feed loading start
-    if (feedAsync.isLoading && _feedLoadStartTime == null) {
-      _feedLoadStartTime = DateTime.now();
-      _feedTracker?.startFeedLoad('popular');
-    }
-
-    // CRITICAL: Check hasValue FIRST before isLoading
-    if (feedAsync.hasValue && feedAsync.value != null) {
-      return _buildDataState(feedAsync.value!.videos);
-    }
-
-    if (feedAsync.hasError) {
-      _trackErrorState(feedAsync.error);
-      return const _PopularVideosErrorState();
-    }
-
-    // Only show loading if we truly have no data yet
-    _trackLoadingState();
-    return const _PopularVideosLoadingState();
-  }
-
-  Widget _buildDataState(List<VideoEvent> videos) {
-    // Videos are already sorted by loops from the provider (REST API or Nostr fallback)
-    // and filtered for platform compatibility
-
-    Log.info(
-      '✅ PopularVideosTab: Data state - ${videos.length} videos '
-      '(top loops: ${videos.isNotEmpty ? videos.first.originalLoops ?? 0 : 0})',
-      name: 'PopularVideosTab',
-      category: LogCategory.video,
-    );
-
-    // Track feed loaded with videos
-    if (_feedLoadStartTime != null) {
-      _feedTracker?.markFirstVideosReceived('popular', videos.length);
-      _feedTracker?.markFeedDisplayed('popular', videos.length);
-      _screenAnalytics?.markDataLoaded(
-        'explore_screen',
-        dataMetrics: {'tab': 'popular', 'video_count': videos.length},
-      );
-      _feedLoadStartTime = null;
-    }
-
-    // Track empty feed
-    if (videos.isEmpty) {
-      _feedTracker?.trackEmptyFeed('popular');
-    }
-
-    // Get the feed state for pagination info
-    final feedState = ref.watch(popularVideosFeedProvider).value;
-    return _PopularVideosTrendingContent(
-      videos: videos,
-      isLoadingMore: feedState?.isLoadingMore ?? false,
-      hasMoreContent: feedState?.hasMoreContent ?? false,
+    return BlocProvider(
+      create: (_) => PopularVideosFeedBloc(
+        fetch: () => videosRepository.getPopularVideos(limit: 20),
+        fetchMore: (current) => videosRepository.getPopularVideos(
+          limit: 20,
+          until: current.last.createdAt - 1,
+        ),
+        pageSize: 20,
+      )..add(const ExploreFeedStarted()),
+      child: const _PopularVideosTabView(),
     );
   }
+}
 
-  void _trackErrorState(Object? error) {
-    Log.error(
-      '❌ PopularVideosTab: Error state - $error',
-      name: 'PopularVideosTab',
-      category: LogCategory.video,
-    );
+class _PopularVideosTabView extends StatelessWidget {
+  const _PopularVideosTabView();
 
-    final loadTime = _feedLoadStartTime != null
-        ? DateTime.now().difference(_feedLoadStartTime!).inMilliseconds
-        : null;
-    _feedTracker?.trackFeedError(
-      'popular',
-      errorType: 'load_failed',
-      errorMessage: error.toString(),
-    );
-    _errorTracker?.trackFeedLoadError(
+  @override
+  Widget build(BuildContext context) {
+    return ExploreFeedAnalyticsListener<PopularVideosFeedBloc>(
       feedType: 'popular',
-      errorType: 'provider_error',
-      errorMessage: error.toString(),
-      loadTimeMs: loadTime,
+      child: BlocBuilder<PopularVideosFeedBloc, ExploreFeedState>(
+        builder: (context, state) {
+          return switch (state.status) {
+            ExploreFeedStatus.initial ||
+            ExploreFeedStatus.loading => const _PopularVideosLoadingState(),
+            ExploreFeedStatus.failure => const _PopularVideosErrorState(),
+            ExploreFeedStatus.success => _PopularVideosTrendingContent(
+              videos: state.videos,
+              isLoadingMore: state.isLoadingMore,
+              hasMoreContent: state.hasMore,
+            ),
+          };
+        },
+      ),
     );
-    _feedLoadStartTime = null;
-  }
-
-  void _trackLoadingState() {
-    Log.info(
-      '⏳ PopularVideosTab: Showing loading indicator',
-      name: 'PopularVideosTab',
-      category: LogCategory.video,
-    );
-
-    if (_feedLoadStartTime != null) {
-      final elapsed = DateTime.now()
-          .difference(_feedLoadStartTime!)
-          .inMilliseconds;
-      if (elapsed > 5000) {
-        _errorTracker?.trackSlowOperation(
-          operation: 'popular_feed_load',
-          durationMs: elapsed,
-          thresholdMs: 5000,
-          location: 'explore_popular',
-        );
-      }
-    }
   }
 }
 
@@ -182,7 +85,7 @@ class _PopularVideosTabState extends ConsumerState<PopularVideosTab> {
 ///
 /// Hashtags push up as user scrolls down (1:1 with scroll distance).
 /// When scrolling up, hashtags slide back in as an overlay with animation.
-class _PopularVideosTrendingContent extends ConsumerStatefulWidget {
+class _PopularVideosTrendingContent extends StatefulWidget {
   const _PopularVideosTrendingContent({
     required this.videos,
     required this.isLoadingMore,
@@ -194,12 +97,12 @@ class _PopularVideosTrendingContent extends ConsumerStatefulWidget {
   final bool hasMoreContent;
 
   @override
-  ConsumerState<_PopularVideosTrendingContent> createState() =>
+  State<_PopularVideosTrendingContent> createState() =>
       _PopularVideosTrendingContentState();
 }
 
 class _PopularVideosTrendingContentState
-    extends ConsumerState<_PopularVideosTrendingContent>
+    extends State<_PopularVideosTrendingContent>
     with ScrollToHideMixin {
   late final StreamController<List<VideoEvent>> _videosStreamController;
 
@@ -210,6 +113,14 @@ class _PopularVideosTrendingContentState
   }
 
   @override
+  void didUpdateWidget(_PopularVideosTrendingContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.videos != oldWidget.videos) {
+      _videosStreamController.add(widget.videos);
+    }
+  }
+
+  @override
   void dispose() {
     _videosStreamController.close();
     super.dispose();
@@ -217,12 +128,7 @@ class _PopularVideosTrendingContentState
 
   @override
   Widget build(BuildContext context) {
-    // Listen to provider changes and push to stream for fullscreen updates
-    ref.listen(popularVideosFeedProvider, (previous, next) {
-      if (next.hasValue && next.value != null) {
-        _videosStreamController.add(next.value!.videos);
-      }
-    });
+    final bloc = context.read<PopularVideosFeedBloc>();
     final hashtags = TopHashtagsService.instance.getTopHashtags(limit: 20);
 
     measureHeaderHeight();
@@ -243,39 +149,24 @@ class _PopularVideosTrendingContentState
                 top: headerHeight > 0 ? headerHeight + 4 : 4,
               ),
               onVideoTap: (videoList, index) {
-                Log.info(
-                  '🎯 PopularVideosTab TAP: gridIndex=$index, '
-                  'videoId=${videoList[index].id}',
-                  category: LogCategory.video,
-                );
                 context.push(
                   PooledFullscreenVideoFeedScreen.path,
                   extra: PooledFullscreenVideoFeedArgs(
-                    // Use startWith to ensure initial videos are delivered
-                    // before FullscreenFeedBloc subscribes to the stream
                     videosStream: _videosStreamController.stream.startWith(
                       videoList,
                     ),
                     initialIndex: index,
                     onLoadMore: () =>
-                        ref.read(popularVideosFeedProvider.notifier).loadMore(),
+                        bloc.add(const ExploreFeedLoadMoreRequested()),
                     contextTitle: 'Popular Videos',
                   ),
                 );
               },
               onRefresh: () async {
-                Log.info(
-                  '🔄 PopularVideosTab: Refreshing',
-                  category: LogCategory.video,
-                );
-                await ref.read(popularVideosFeedProvider.notifier).refresh();
+                bloc.add(const ExploreFeedRefreshRequested());
               },
               onLoadMore: () async {
-                Log.info(
-                  '📜 PopularVideosTab: Loading more',
-                  category: LogCategory.video,
-                );
-                await ref.read(popularVideosFeedProvider.notifier).loadMore();
+                bloc.add(const ExploreFeedLoadMoreRequested());
               },
               isLoadingMore: widget.isLoadingMore,
               hasMoreContent: widget.hasMoreContent,
@@ -303,7 +194,7 @@ class _PopularVideosTrendingContentState
   }
 }
 
-/// Empty state widget for PopularVideosTab
+/// Empty state widget for PopularVideosTab.
 class _PopularVideosEmptyState extends StatelessWidget {
   const _PopularVideosEmptyState();
 
@@ -334,7 +225,7 @@ class _PopularVideosEmptyState extends StatelessWidget {
   }
 }
 
-/// Error state widget for PopularVideosTab
+/// Error state widget for PopularVideosTab.
 class _PopularVideosErrorState extends StatelessWidget {
   const _PopularVideosErrorState();
 
@@ -356,7 +247,7 @@ class _PopularVideosErrorState extends StatelessWidget {
   }
 }
 
-/// Loading state widget for PopularVideosTab
+/// Loading state widget for PopularVideosTab.
 class _PopularVideosLoadingState extends StatelessWidget {
   const _PopularVideosLoadingState();
 
