@@ -1,7 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-
 import 'package:pooled_video_player/src/models/video_pool_config.dart';
 
 /// A pooled player instance containing both Player and VideoController.
@@ -198,8 +199,9 @@ class PlayerPool {
     }
 
     // Reuse an idle player if available (avoids native player creation)
-    final player =
-        _idle.isNotEmpty ? _idle.removeLast() : await _createPlayer();
+    final player = _idle.isNotEmpty
+        ? _idle.removeLast()
+        : await _createPlayer();
     _players[url] = player;
     _lruOrder.add(url);
 
@@ -236,6 +238,23 @@ class PlayerPool {
     if (player != null && !player.isDisposed) {
       await player.player.stop();
       _idle.add(player);
+    }
+  }
+
+  /// Stop all active player playback without disposing.
+  ///
+  /// Used during hot reload to prevent native mpv callbacks from firing
+  /// on invalidated Dart FFI handles, which causes a fatal crash:
+  /// "Callback invoked after it has been deleted."
+  void stopAll() {
+    for (final player in _players.values) {
+      if (!player.isDisposed) {
+        try {
+          unawaited(player.player.stop());
+        } on Exception {
+          // Ignore errors during emergency stop
+        }
+      }
     }
   }
 
