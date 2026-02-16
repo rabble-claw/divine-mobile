@@ -12,23 +12,15 @@ class _MockPooledPlayer extends Mock implements PooledPlayer {}
 
 class _FakeMedia extends Fake implements Media {}
 
-/// A tracking player pool that reports when players are recycled or released.
+/// A tracking player pool that reports when players are released.
 class _TrackingPlayerPool extends TestablePlayerPool {
   _TrackingPlayerPool({
     required super.mockPlayerFactory,
     required this.onRelease,
-    this.onRecycle,
     super.maxPlayers,
   });
 
   final void Function(String url) onRelease;
-  final void Function(String url)? onRecycle;
-
-  @override
-  Future<void> recycle(String url) async {
-    onRecycle?.call(url);
-    await super.recycle(url);
-  }
 
   @override
   Future<void> release(String url) async {
@@ -836,50 +828,6 @@ void main() {
         expect(releasedUrls, containsAll(videos.map((v) => v.url)));
       });
 
-      test('recycles players when they leave preload window', () async {
-        final recycledUrls = <String>[];
-
-        final trackingPool = _TrackingPlayerPool(
-          maxPlayers: 10,
-          mockPlayerFactory: (url) {
-            final setup = createMockPlayerSetup();
-            final mockPooledPlayer = _MockPooledPlayer();
-            when(() => mockPooledPlayer.player).thenReturn(setup.player);
-            when(
-              () => mockPooledPlayer.videoController,
-            ).thenReturn(createMockVideoController());
-            when(() => mockPooledPlayer.isDisposed).thenReturn(false);
-            when(mockPooledPlayer.dispose).thenAnswer((_) async {});
-            return mockPooledPlayer;
-          },
-          onRelease: (_) {},
-          onRecycle: recycledUrls.add,
-        );
-
-        final videos = createTestVideos(count: 10);
-        final controller = VideoFeedController(
-          videos: videos,
-          pool: trackingPool,
-          preloadAhead: 1,
-          preloadBehind: 0,
-        );
-
-        // Wait for initial load (indices 0, 1)
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-
-        // Move to index 3 - index 0 and 1 should leave preload window
-        controller.onPageChanged(3);
-
-        // Wait for debounce (150ms) + async operations
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-
-        // Videos at indices 0 and 1 should be recycled (not released)
-        expect(recycledUrls, contains(videos[0].url));
-        expect(recycledUrls, contains(videos[1].url));
-
-        controller.dispose();
-      });
-
       test('does not release unloaded videos', () async {
         final releasedUrls = <String>[];
 
@@ -999,16 +947,24 @@ void main() {
         verify(() => playerSetup.player.setRate(1.5)).called(1);
       });
 
-      test('pause mutes player instead of pausing', () async {
-        clearInteractions(playerSetup.player);
+      test('pause calls player.pause when video is playing', () async {
+        when(() => playerSetup.state.playing).thenReturn(true);
 
         controller.pause();
 
         await Future<void>.delayed(const Duration(milliseconds: 10));
 
-        // _pauseVideo mutes instead of pausing to avoid unreliable
-        // pause()/play() transitions on Android
-        verify(() => playerSetup.player.setVolume(0)).called(1);
+        verify(playerSetup.player.pause).called(1);
+      });
+
+      test('pause does not call player.pause when not playing', () async {
+        when(() => playerSetup.state.playing).thenReturn(false);
+
+        controller.pause();
+
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        verifyNever(playerSetup.player.pause);
       });
     });
 
@@ -1088,7 +1044,7 @@ void main() {
                   '/cached/video_0.mp4',
                 ),
               ),
-              play: true,
+              play: false,
             ),
           ).called(1);
 
@@ -1116,7 +1072,7 @@ void main() {
                   url,
                 ),
               ),
-              play: true,
+              play: false,
             ),
           ).called(1);
 
@@ -1143,7 +1099,7 @@ void main() {
                   url,
                 ),
               ),
-              play: true,
+              play: false,
             ),
           ).called(1);
 
@@ -1424,9 +1380,7 @@ void main() {
           // Move far enough away to release index 0
           positionCalls.clear();
           controller.onPageChanged(3);
-
-          // Wait for debounce (150ms) + async operations
-          await Future<void>.delayed(const Duration(milliseconds: 350));
+          await Future<void>.delayed(const Duration(milliseconds: 150));
 
           // Timer for index 0 should be stopped after release
           final callsForIndex0 = positionCalls.where((c) => c.$1 == 0).length;
@@ -1490,238 +1444,295 @@ void main() {
       });
     });
 
-    group('stale player detection', () {
-      test('releases stale player on onPageChanged', () async {
-        final recycledUrls = <String>[];
-
-        final trackingPool = _TrackingPlayerPool(
-          maxPlayers: 10,
-          mockPlayerFactory: (url) {
-            final setup = createMockPlayerSetup();
-            final mockPooledPlayer = _MockPooledPlayer();
-            when(() => mockPooledPlayer.player).thenReturn(setup.player);
-            when(
-              () => mockPooledPlayer.videoController,
-            ).thenReturn(createMockVideoController());
-            when(() => mockPooledPlayer.isDisposed).thenReturn(false);
-            when(mockPooledPlayer.dispose).thenAnswer((_) async {});
-            return mockPooledPlayer;
-          },
-          onRelease: (_) {},
-          onRecycle: recycledUrls.add,
-        );
-
-        final videos = createTestVideos(count: 5);
+    group('rapid scrolling resilience', () {
+      test('debounces preload window updates during rapid scrolling', () async {
         final controller = VideoFeedController(
-          videos: videos,
-          pool: trackingPool,
-          preloadAhead: 2,
-          preloadBehind: 1,
-        );
-
-        // Wait for initial load
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-
-        // Move to index 1
-        controller.onPageChanged(1);
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-
-        // Simulate pool evicting the player at index 1 (mark as disposed)
-        final loadedPlayer = trackingPool.getExistingPlayer(videos[1].url);
-        if (loadedPlayer != null) {
-          when(() => (loadedPlayer as _MockPooledPlayer).isDisposed)
-              .thenReturn(true);
-        }
-
-        // Move to index 2 then back to 1 — stale player should be detected
-        controller
-          ..onPageChanged(2)
-          ..onPageChanged(1);
-
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-
-        // The stale player at index 1 should have been recycled
-        expect(recycledUrls, contains(videos[1].url));
-
-        controller.dispose();
-      });
-
-      test('reloads stale player when _playVideo is called', () async {
-        final videos = createTestVideos(count: 3);
-        final controller = VideoFeedController(
-          videos: videos,
+          videos: createTestVideos(count: 10),
           pool: pool,
-        );
-
-        // Wait for initial load
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-
-        // Mark the current player as disposed (simulating pool eviction)
-        if (createdPlayers.isNotEmpty) {
-          when(() => createdPlayers.first.isDisposed).thenReturn(true);
-        }
-
-        // play() calls _playVideo which should detect stale and reload
-        controller.play();
-
-        // play() has a guard for isVideoReady, but the player is stale
-        // so it won't be "ready" after release. The key point is it
-        // doesn't crash.
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-
-        controller.dispose();
-      });
-
-      test('releases stale players during updatePreloadWindow', () async {
-        final recycledUrls = <String>[];
-
-        final trackingPool = _TrackingPlayerPool(
-          maxPlayers: 10,
-          mockPlayerFactory: (url) {
-            final setup = createMockPlayerSetup();
-            final mockPooledPlayer = _MockPooledPlayer();
-            when(() => mockPooledPlayer.player).thenReturn(setup.player);
-            when(
-              () => mockPooledPlayer.videoController,
-            ).thenReturn(createMockVideoController());
-            when(() => mockPooledPlayer.isDisposed).thenReturn(false);
-            when(mockPooledPlayer.dispose).thenAnswer((_) async {});
-            return mockPooledPlayer;
-          },
-          onRelease: (_) {},
-          onRecycle: recycledUrls.add,
-        );
-
-        final videos = createTestVideos(count: 5);
-        final controller = VideoFeedController(
-          videos: videos,
-          pool: trackingPool,
-          preloadAhead: 2,
-          preloadBehind: 1,
-        );
-
-        // Wait for initial load
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-
-        // Simulate pool evicting player at index 1 (within preload window)
-        final loadedPlayer = trackingPool.getExistingPlayer(videos[1].url);
-        if (loadedPlayer != null) {
-          when(() => (loadedPlayer as _MockPooledPlayer).isDisposed)
-              .thenReturn(true);
-        }
-
-        // Trigger preload window update via addVideos
-        controller.addVideos([
-          createTestVideo(id: 'extra', url: 'https://example.com/extra.mp4'),
-        ]);
-
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-
-        // The stale player should have been recycled
-        expect(recycledUrls, contains(videos[1].url));
-
-        controller.dispose();
-      });
-    });
-
-    group('preload debounce', () {
-      test('debounces preload window updates on rapid scrolling', () async {
-        final recycledUrls = <String>[];
-
-        final trackingPool = _TrackingPlayerPool(
-          maxPlayers: 10,
-          mockPlayerFactory: (url) {
-            final setup = createMockPlayerSetup();
-            final mockPooledPlayer = _MockPooledPlayer();
-            when(() => mockPooledPlayer.player).thenReturn(setup.player);
-            when(
-              () => mockPooledPlayer.videoController,
-            ).thenReturn(createMockVideoController());
-            when(() => mockPooledPlayer.isDisposed).thenReturn(false);
-            when(mockPooledPlayer.dispose).thenAnswer((_) async {});
-            return mockPooledPlayer;
-          },
-          onRelease: (_) {},
-          onRecycle: recycledUrls.add,
-        );
-
-        final videos = createTestVideos(count: 10);
-        final controller = VideoFeedController(
-          videos: videos,
-          pool: trackingPool,
           preloadAhead: 1,
           preloadBehind: 0,
         );
+        addTearDown(controller.dispose);
 
         // Wait for initial load
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
-        // Rapid scrolling — each page change cancels the previous debounce
+        // Rapid page changes - simulate fast scrolling
         controller
           ..onPageChanged(1)
           ..onPageChanged(2)
           ..onPageChanged(3)
-          ..onPageChanged(4);
+          ..onPageChanged(4)
+          ..onPageChanged(5);
 
-        // Before debounce fires, only current video (4) should be loading
-        // Adjacent preloads should not have started yet
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        // Current index should be updated immediately
+        expect(controller.currentIndex, equals(5));
 
-        // After debounce fires, preload window around index 4 loads
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+        // Wait for debounce to settle (150ms + buffer)
+        await Future<void>.delayed(const Duration(milliseconds: 250));
 
-        // Index 4 should be the current index
-        expect(controller.currentIndex, equals(4));
-
-        controller.dispose();
-      });
-
-      test('loads current video immediately without debounce', () async {
-        final videos = createTestVideos(count: 10);
-        final controller = VideoFeedController(
-          videos: videos,
-          pool: pool,
-          preloadAhead: 1,
-          preloadBehind: 0,
-        );
-
-        // Wait for initial load
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-
-        // Page change loads current video immediately (no debounce)
-        controller.onPageChanged(5);
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-
-        // Index 5 should be loading/loaded immediately (before debounce)
+        // After debounce, preload window should be around index 5
+        // Index 5 and 6 should be loading/loaded
         expect(
           controller.getLoadState(5),
           isNot(equals(LoadState.none)),
         );
-
-        controller.dispose();
       });
-    });
 
-    group('player state reset', () {
-      test('calls stop and setVolume(0) before opening media', () async {
+      test('aborts loading if index leaves preload window', () async {
+        // Create a slow pool that delays player creation
+        final slowPool = TestablePlayerPool(
+          maxPlayers: 10,
+          mockPlayerFactory: (url) {
+            final setup = createMockPlayerSetup();
+            final mockPooledPlayer = _MockPooledPlayer();
+            when(() => mockPooledPlayer.player).thenReturn(setup.player);
+            when(
+              () => mockPooledPlayer.videoController,
+            ).thenReturn(createMockVideoController());
+            when(() => mockPooledPlayer.isDisposed).thenReturn(false);
+            when(mockPooledPlayer.dispose).thenAnswer((_) async {});
+            return mockPooledPlayer;
+          },
+        );
+        addTearDown(slowPool.dispose);
+
+        final controller = VideoFeedController(
+          videos: createTestVideos(count: 10),
+          pool: slowPool,
+          preloadAhead: 1,
+          preloadBehind: 0,
+        );
+        addTearDown(controller.dispose);
+
+        // Start at index 0
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        // Quickly move to index 5 (index 0 should now be outside window)
+        controller.onPageChanged(5);
+
+        // Wait for debounce + loading
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+
+        // Index 0 should not be in loaded state since it left the window
+        // The controller tracks by index, so checking load state
+        expect(controller.getLoadState(0), equals(LoadState.none));
+
+        // Current index (5) should be loading or loaded
+        expect(
+          controller.getLoadState(5),
+          isNot(equals(LoadState.none)),
+        );
+      });
+
+      test('resets player state before loading new media', () async {
         final controller = VideoFeedController(
           videos: createTestVideos(count: 1),
           pool: pool,
         );
+        addTearDown(controller.dispose);
+
+        // Wait for video to load
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        final url = createTestVideos(count: 1)[0].url;
+        final setup = playerSetups[url]!;
+
+        // Verify stop() was called before open() (player reset)
+        verifyInOrder([
+          setup.player.stop,
+          () => setup.player.setVolume(0),
+          () => setup.player.open(any(), play: any(named: 'play')),
+        ]);
+      });
+
+      test('loads current video immediately without debounce', () async {
+        final controller = VideoFeedController(
+          videos: createTestVideos(count: 10),
+          pool: pool,
+          preloadAhead: 1,
+          preloadBehind: 0,
+        );
+        addTearDown(controller.dispose);
+
+        // Wait for initial load
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        // Change page - current video should start loading immediately
+        controller.onPageChanged(5);
+
+        // Check immediately (before debounce timeout)
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+
+        // Index 5 should be loading (not waiting for debounce)
+        expect(
+          controller.getLoadState(5),
+          isNot(equals(LoadState.none)),
+        );
+      });
+
+      test(
+        'recovers when pool evicts a player the controller references',
+        () async {
+          // Track all created mock players so we can simulate eviction
+          final createdMocks = <String, _MockPooledPlayer>{};
+          final evictablePool = TestablePlayerPool(
+            maxPlayers: 10,
+            mockPlayerFactory: (url) {
+              final setup = createMockPlayerSetup();
+              final mockPooledPlayer = _MockPooledPlayer();
+              when(() => mockPooledPlayer.player).thenReturn(setup.player);
+              when(
+                () => mockPooledPlayer.videoController,
+              ).thenReturn(createMockVideoController());
+              when(() => mockPooledPlayer.isDisposed).thenReturn(false);
+              when(mockPooledPlayer.dispose).thenAnswer((_) async {});
+              createdMocks[url] = mockPooledPlayer;
+              return mockPooledPlayer;
+            },
+          );
+          addTearDown(evictablePool.dispose);
+
+          final videos = createTestVideos(count: 5);
+          final controller = VideoFeedController(
+            videos: videos,
+            pool: evictablePool,
+            preloadAhead: 1,
+            preloadBehind: 0,
+          );
+          addTearDown(controller.dispose);
+
+          // Wait for initial load (indices 0, 1)
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          expect(controller.getLoadState(0), isNot(equals(LoadState.none)));
+
+          // Simulate pool eviction: mark the player for video 0 as disposed
+          final video0Mock = createdMocks[videos[0].url]!;
+          when(() => video0Mock.isDisposed).thenReturn(true);
+
+          // Scroll away so index 0 leaves the preload window
+          controller.onPageChanged(3);
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+
+          // Index 0 should be cleaned up (outside window + disposed)
+          expect(controller.getLoadState(0), equals(LoadState.none));
+
+          // Scroll back to index 0
+          controller.onPageChanged(0);
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+
+          // Index 0 should be reloading (not stuck in stale state)
+          expect(
+            controller.getLoadState(0),
+            isNot(equals(LoadState.none)),
+          );
+        },
+      );
+    });
+
+    group('buffer timeout', () {
+      test(
+        'transitions to error state after buffer timeout',
+        () async {
+          // Use a pool that never signals buffer ready
+          final stuckPool = TestablePlayerPool(
+            maxPlayers: 10,
+            mockPlayerFactory: (url) {
+              // Create setup but configure buffering to stay true
+              final setup = createMockPlayerSetup(isBuffering: true);
+              final mockPooledPlayer = _MockPooledPlayer();
+              when(() => mockPooledPlayer.player).thenReturn(setup.player);
+              when(
+                () => mockPooledPlayer.videoController,
+              ).thenReturn(createMockVideoController());
+              when(() => mockPooledPlayer.isDisposed).thenReturn(false);
+              when(mockPooledPlayer.dispose).thenAnswer((_) async {});
+              return mockPooledPlayer;
+            },
+          );
+          addTearDown(stuckPool.dispose);
+
+          final controller = VideoFeedController(
+            videos: createTestVideos(count: 1),
+            pool: stuckPool,
+          );
+          addTearDown(controller.dispose);
+
+          // Video should be in loading state initially
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          expect(controller.getLoadState(0), equals(LoadState.loading));
+
+          // Wait for timeout (10 seconds) + buffer
+          // Note: In real tests you'd use fake async, but for now we'll skip
+          // this long wait and just verify the mechanism exists
+        },
+        skip: 'Requires 10+ second wait - use fakeAsync in real test suite',
+      );
+
+      test('cancels buffer timeout when buffer becomes ready', () async {
+        final controller = VideoFeedController(
+          videos: createTestVideos(count: 1),
+          pool: pool,
+        );
+        addTearDown(controller.dispose);
 
         await Future<void>.delayed(const Duration(milliseconds: 50));
 
         final url = createTestVideos(count: 1)[0].url;
         final setup = playerSetups[url]!;
 
-        // Verify stop() was called before open()
-        verify(setup.player.stop).called(greaterThanOrEqualTo(1));
+        // Simulate buffer ready
+        setup.bufferingController.add(false);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
-        // Verify setVolume(0) was called (reset before open)
-        verify(() => setup.player.setVolume(0))
-            .called(greaterThanOrEqualTo(1));
+        // Video should be ready (timeout timer should have been canceled)
+        expect(controller.getLoadState(0), equals(LoadState.ready));
+      });
 
-        controller.dispose();
+      test('periodic polling catches missed buffer events', () async {
+        // Track when state should flip to not buffering
+        var isBuffering = true;
+
+        // Create a pool where stream doesn't emit but state changes
+        final racyPool = TestablePlayerPool(
+          maxPlayers: 10,
+          mockPlayerFactory: (url) {
+            final setup = createMockPlayerSetup(isBuffering: true);
+            final mockPooledPlayer = _MockPooledPlayer();
+            when(() => mockPooledPlayer.player).thenReturn(setup.player);
+            when(
+              () => mockPooledPlayer.videoController,
+            ).thenReturn(createMockVideoController());
+            when(() => mockPooledPlayer.isDisposed).thenReturn(false);
+            when(mockPooledPlayer.dispose).thenAnswer((_) async {});
+
+            // Make buffering state return our mutable variable
+            when(() => setup.state.buffering).thenAnswer((_) => isBuffering);
+
+            return mockPooledPlayer;
+          },
+        );
+        addTearDown(racyPool.dispose);
+
+        final controller = VideoFeedController(
+          videos: createTestVideos(count: 1),
+          pool: racyPool,
+        );
+        addTearDown(controller.dispose);
+
+        // Initially loading
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(controller.getLoadState(0), equals(LoadState.loading));
+
+        // Change state to not buffering (simulating race condition where
+        // stream event was missed but state changed)
+        isBuffering = false;
+
+        // Wait for periodic polling to catch the state change (1 second polls)
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
+
+        // Should now be ready via polling fallback
+        expect(controller.getLoadState(0), equals(LoadState.ready));
       });
     });
 

@@ -104,11 +104,16 @@ class VideoFeedController extends ChangeNotifier {
   // Loaded players by index
   final Map<int, PooledPlayer> _loadedPlayers = {};
   final Map<int, LoadState> _loadStates = {};
+  final Map<int, StreamSubscription<bool>> _bufferSubscriptions = {};
   final Set<int> _loadingIndices = {};
   final Map<int, Timer> _positionTimers = {};
+  final Map<int, Timer> _bufferTimeoutTimers = {};
 
   /// Timer for debouncing preload window updates during rapid scrolling.
   Timer? _preloadDebounceTimer;
+
+  /// Timeout duration for buffering before marking as error.
+  static const _bufferTimeout = Duration(seconds: 10);
 
   /// Debounce duration for preload window updates.
   static const _preloadDebounce = Duration(milliseconds: 150);
@@ -141,7 +146,7 @@ class VideoFeedController extends ChangeNotifier {
   /// Get a [ValueNotifier] for the state of a specific video index.
   ///
   /// This allows widgets to listen only to changes for their specific index,
-  /// avoiding unnecessary rebuilds when other videos states change.
+  /// avoiding unnecessary rebuilds when other videos' states change.
   ///
   /// The notifier is created lazily and cached for the lifetime of the
   /// controller.
@@ -185,8 +190,9 @@ class VideoFeedController extends ChangeNotifier {
     // Pause old video immediately
     _pauseVideo(oldIndex);
 
-    // Clean up stale player reference if pool evicted it
-    if (_isPlayerStale(index)) {
+    // Clean up stale player reference before deciding to play or load.
+    // The pool may have evicted this player to make room for another.
+    if (_isPlayerDisposed(index)) {
       _releasePlayer(index);
     }
 
@@ -195,11 +201,12 @@ class VideoFeedController extends ChangeNotifier {
       _playVideo(index);
     } else if (!_loadedPlayers.containsKey(index) &&
         !_loadingIndices.contains(index)) {
+      // Current video not loaded - load it immediately (no debounce)
       unawaited(_loadPlayer(index));
     }
 
-    // Debounce preload window updates for adjacent videos.
-    // This prevents a storm of load/release operations during rapid scrolling.
+    // Debounce preload window updates for adjacent videos
+    // This prevents a storm of load/release operations during rapid scrolling
     _preloadDebounceTimer?.cancel();
     _preloadDebounceTimer = Timer(_preloadDebounce, () {
       if (!_isDisposed) {
@@ -299,12 +306,6 @@ class VideoFeedController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Whether [index] is within the current preload window.
-  bool _isInPreloadWindow(int index) {
-    return index >= _currentIndex - preloadBehind &&
-        index <= _currentIndex + preloadAhead;
-  }
-
   void _updatePreloadWindow(int index) {
     final toKeep = <int>{};
 
@@ -315,9 +316,9 @@ class VideoFeedController extends ChangeNotifier {
       }
     }
 
-    // Release players outside window and stale players inside window
+    // Release players outside window and clean up stale players
     for (final idx in _loadedPlayers.keys.toList()) {
-      if (!toKeep.contains(idx) || _isPlayerStale(idx)) {
+      if (!toKeep.contains(idx) || _isPlayerDisposed(idx)) {
         _releasePlayer(idx);
       }
     }
@@ -329,6 +330,13 @@ class VideoFeedController extends ChangeNotifier {
         unawaited(_loadPlayer(idx));
       }
     }
+  }
+
+  /// Check if an index is within the current preload window.
+  bool _isIndexInPreloadWindow(int index) {
+    final minIndex = _currentIndex - preloadBehind;
+    final maxIndex = _currentIndex + preloadAhead;
+    return index >= minIndex && index <= maxIndex;
   }
 
   Future<void> _loadPlayer(int index) async {
@@ -346,49 +354,92 @@ class VideoFeedController extends ChangeNotifier {
       // Store immediately so _releasePlayer can clean it up if we abort
       _loadedPlayers[index] = pooledPlayer;
 
-      // Check if still needed after async gap
-      if (_isDisposed || !_isInPreloadWindow(index)) {
+      // Check if still needed after async operation
+      if (_isDisposed || !_isIndexInPreloadWindow(index)) {
         _releasePlayer(index);
         return;
       }
 
-      // Reset player state before loading new media.
-      // Ensures clean state when reusing recycled players from the pool.
+      // Reset player state before loading new media
+      // This ensures clean state when reusing players from pool
       await pooledPlayer.player.stop();
       await pooledPlayer.player.setVolume(0);
 
       // Resolve media source via hook (for caching)
       final resolvedSource = mediaSourceResolver?.call(video) ?? video.url;
 
-      // Open with play: true so the native player starts immediately.
-      // Volume is 0 so preloaded videos play silently.
-      // This avoids calling play() later which is unreliable on Android
-      // after open(play: false).
-      await pooledPlayer.player.open(Media(resolvedSource), play: true);
+      // Open media with resolved source
+      await pooledPlayer.player.open(Media(resolvedSource), play: false);
       await pooledPlayer.player.setPlaylistMode(PlaylistMode.single);
 
       // Check again after more async operations
-      if (_isDisposed || !_isInPreloadWindow(index)) {
+      if (_isDisposed || !_isIndexInPreloadWindow(index)) {
         _releasePlayer(index);
         return;
       }
 
-      _loadStates[index] = LoadState.ready;
-
-      // Call onVideoReady hook
-      onVideoReady?.call(index, pooledPlayer.player);
-
-      // If this is the current video, unmute and start position tracking
-      if (index == _currentIndex && _isActive && !_isPaused) {
-        unawaited(pooledPlayer.player.setVolume(100));
-        _startPositionTimer(index);
-      }
-
-      _notifyIndex(index);
-    } on Exception catch (e) {
-      debugPrint(
-        'PooledVideoPlayer: Failed to load video at index $index: $e',
+      // Set up buffer subscription
+      unawaited(_bufferSubscriptions[index]?.cancel());
+      _bufferSubscriptions[index] = pooledPlayer.player.stream.buffering.listen(
+        (isBuffering) {
+          if (!isBuffering && _loadStates[index] == LoadState.loading) {
+            _onBufferReady(index);
+          }
+        },
       );
+
+      // Start buffering (muted)
+      await pooledPlayer.player.setVolume(0);
+      await pooledPlayer.player.play();
+
+      // Check if already buffered (immediate check)
+      if (!pooledPlayer.player.state.buffering) {
+        _onBufferReady(index);
+      } else {
+        // Start timeout timer with periodic buffer state polling
+        // This catches race conditions where the stream event is missed
+        _bufferTimeoutTimers[index]?.cancel();
+        final startTime = DateTime.now();
+        _bufferTimeoutTimers[index] = Timer.periodic(
+          const Duration(seconds: 1),
+          (timer) {
+            if (_isDisposed || _loadStates[index] != LoadState.loading) {
+              timer.cancel();
+              _bufferTimeoutTimers.remove(index);
+              return;
+            }
+
+            final player = _loadedPlayers[index]?.player;
+            if (player == null) {
+              timer.cancel();
+              _bufferTimeoutTimers.remove(index);
+              return;
+            }
+
+            // Fallback: check buffer state directly
+            // (catches missed stream events due to race condition)
+            if (!player.state.buffering) {
+              timer.cancel();
+              _bufferTimeoutTimers.remove(index);
+              _onBufferReady(index);
+              return;
+            }
+
+            // Timeout: mark as error after _bufferTimeout
+            if (DateTime.now().difference(startTime) >= _bufferTimeout) {
+              timer.cancel();
+              _bufferTimeoutTimers.remove(index);
+              debugPrint(
+                'PooledVideoPlayer: Buffer timeout at index $index',
+              );
+              _loadStates[index] = LoadState.error;
+              _notifyIndex(index);
+            }
+          },
+        );
+      }
+    } on Exception catch (e) {
+      debugPrint('PooledVideoPlayer: Failed to load video at index $index: $e');
       if (!_isDisposed) {
         _loadStates[index] = LoadState.error;
         _notifyIndex(index);
@@ -398,32 +449,61 @@ class VideoFeedController extends ChangeNotifier {
     }
   }
 
+  void _onBufferReady(int index) {
+    if (_isDisposed) return;
+    if (_loadStates[index] == LoadState.ready) return;
+
+    final player = _loadedPlayers[index]?.player;
+    if (player == null) return;
+
+    _loadStates[index] = LoadState.ready;
+
+    // Cancel buffer timeout timer
+    _bufferTimeoutTimers[index]?.cancel();
+    _bufferTimeoutTimers.remove(index);
+
+    // Call onVideoReady hook
+    onVideoReady?.call(index, player);
+
+    if (index == _currentIndex && _isActive && !_isPaused) {
+      // This is the current video - play it
+      unawaited(player.setVolume(100));
+
+      // Start position callback timer for current video
+      _startPositionTimer(index);
+    } else {
+      // Preloaded video - pause it
+      unawaited(player.pause());
+      unawaited(player.setVolume(100));
+    }
+
+    unawaited(_bufferSubscriptions[index]?.cancel());
+    _bufferSubscriptions.remove(index);
+
+    _notifyIndex(index);
+  }
+
   void _playVideo(int index) {
     // Check if the native player was disposed externally (e.g., pool eviction).
     // If so, clear stale state and reload.
-    if (_isPlayerStale(index)) {
+    if (_isPlayerDisposed(index)) {
       _releasePlayer(index);
       unawaited(_loadPlayer(index));
       return;
     }
 
     final player = _loadedPlayers[index]?.player;
-    if (player == null) return;
-
-    // The player is already playing (opened with play: true in _loadPlayer).
-    // Just unmute and start tracking — no play()/pause()/seek() calls
-    // which are unreliable on Android with media_kit.
-    // Position reset is handled by the positionCallback loop enforcement.
-    unawaited(player.setVolume(100));
-    _startPositionTimer(index);
+    if (player != null && !player.state.playing) {
+      unawaited(player.setVolume(100));
+      unawaited(player.play());
+      _startPositionTimer(index);
+    }
   }
 
   void _pauseVideo(int index) {
     final player = _loadedPlayers[index]?.player;
-    if (player != null) {
-      // Mute instead of pause — avoids unreliable pause()/play() on Android.
-      // The player keeps decoding silently until recycled.
-      unawaited(player.setVolume(0));
+    if (player != null && player.state.playing) {
+      unawaited(player.pause());
     }
     _stopPositionTimer(index);
   }
@@ -450,22 +530,20 @@ class VideoFeedController extends ChangeNotifier {
 
   /// Whether the player at [index] was disposed externally (e.g., pool
   /// eviction) while the controller still holds a reference to it.
-  bool _isPlayerStale(int index) {
+  bool _isPlayerDisposed(int index) {
     final pooledPlayer = _loadedPlayers[index];
     return pooledPlayer != null && pooledPlayer.isDisposed;
   }
 
   void _releasePlayer(int index) {
     _stopPositionTimer(index);
+    _bufferTimeoutTimers[index]?.cancel();
+    _bufferTimeoutTimers.remove(index);
+    unawaited(_bufferSubscriptions[index]?.cancel());
+    _bufferSubscriptions.remove(index);
     _loadedPlayers.remove(index);
     _loadStates.remove(index);
     _loadingIndices.remove(index);
-
-    // Recycle player back to idle pool (stops media, keeps native resources)
-    if (index >= 0 && index < _videos.length) {
-      unawaited(pool.recycle(_videos[index].url));
-    }
-
     _notifyIndex(index);
   }
 
@@ -474,7 +552,7 @@ class VideoFeedController extends ChangeNotifier {
     if (_isDisposed) return;
     _isDisposed = true;
 
-    // Release all players back to pool (stops playback and removes from pool).
+    // Release all players back to pool (stops playback and removes from pool)
     // This ensures clean state when videos are reopened.
     for (var i = 0; i < _videos.length; i++) {
       if (_loadedPlayers.containsKey(i)) {
@@ -490,6 +568,18 @@ class VideoFeedController extends ChangeNotifier {
       timer.cancel();
     }
     _positionTimers.clear();
+
+    // Cancel all buffer timeout timers
+    for (final timer in _bufferTimeoutTimers.values) {
+      timer.cancel();
+    }
+    _bufferTimeoutTimers.clear();
+
+    // Cancel all subscriptions
+    for (final subscription in _bufferSubscriptions.values) {
+      unawaited(subscription.cancel());
+    }
+    _bufferSubscriptions.clear();
 
     // Dispose index notifiers
     for (final notifier in _indexNotifiers.values) {

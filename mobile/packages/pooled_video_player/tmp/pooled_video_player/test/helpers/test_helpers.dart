@@ -209,7 +209,6 @@ PlayerPool createMockPlayerPool({int maxPlayers = 5}) {
   when(() => mockPool.playerCount).thenReturn(0);
   when(() => mockPool.hasPlayer(any())).thenReturn(false);
   when(() => mockPool.getExistingPlayer(any())).thenReturn(null);
-  when(() => mockPool.recycle(any())).thenAnswer((_) async {});
   when(() => mockPool.release(any())).thenAnswer((_) async {});
   when(mockPool.dispose).thenAnswer((_) async {});
 
@@ -296,7 +295,6 @@ class TestablePlayerPool extends PlayerPool {
   final PooledPlayer Function(String url) mockPlayerFactory;
 
   final Map<String, PooledPlayer> _testPlayers = {};
-  final List<PooledPlayer> _testIdle = [];
   final List<String> _testLruOrder = [];
 
   @override
@@ -308,19 +306,16 @@ class TestablePlayerPool extends PlayerPool {
       return _testPlayers[url]!;
     }
 
-    // Recycle LRU if at capacity (move to idle, don't dispose)
+    // Evict if at capacity
     while (_testPlayers.length >= maxPlayers && _testLruOrder.isNotEmpty) {
       final evictUrl = _testLruOrder.removeAt(0);
       final evicted = _testPlayers.remove(evictUrl);
       if (evicted != null && !evicted.isDisposed) {
-        await evicted.player.stop();
-        _testIdle.add(evicted);
+        await evicted.dispose();
       }
     }
 
-    // Reuse idle player or create new
-    final player =
-        _testIdle.isNotEmpty ? _testIdle.removeLast() : mockPlayerFactory(url);
+    final player = mockPlayerFactory(url);
     _testPlayers[url] = player;
     _testLruOrder.add(url);
     return player;
@@ -344,19 +339,6 @@ class TestablePlayerPool extends PlayerPool {
   int get playerCount => _testPlayers.length;
 
   @override
-  int get idleCount => _testIdle.length;
-
-  @override
-  Future<void> recycle(String url) async {
-    final player = _testPlayers.remove(url);
-    _testLruOrder.remove(url);
-    if (player != null && !player.isDisposed) {
-      await player.player.stop();
-      _testIdle.add(player);
-    }
-  }
-
-  @override
   Future<void> release(String url) async {
     final player = _testPlayers.remove(url);
     _testLruOrder.remove(url);
@@ -367,14 +349,12 @@ class TestablePlayerPool extends PlayerPool {
 
   @override
   Future<void> dispose() async {
-    final allPlayers = [..._testPlayers.values, ..._testIdle];
-    for (final player in allPlayers) {
+    for (final player in _testPlayers.values) {
       if (!player.isDisposed) {
         await player.dispose();
       }
     }
     _testPlayers.clear();
-    _testIdle.clear();
     _testLruOrder.clear();
   }
 }

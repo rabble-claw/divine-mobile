@@ -157,11 +157,8 @@ class PlayerPool {
   /// Maximum number of players to keep in the pool.
   final int maxPlayers;
 
-  /// Active players keyed by URL.
+  /// Players keyed by URL.
   final Map<String, PooledPlayer> _players = {};
-
-  /// Idle players available for reuse (stopped but native resources alive).
-  final List<PooledPlayer> _idle = [];
 
   /// LRU order - most recently used at the end.
   final List<String> _lruOrder = [];
@@ -169,37 +166,32 @@ class PlayerPool {
   /// Whether the pool has been disposed.
   bool _isDisposed = false;
 
-  /// Number of active players currently in the pool.
+  /// Number of players currently in the pool.
   int get playerCount => _players.length;
-
-  /// Number of idle players available for reuse.
-  int get idleCount => _idle.length;
 
   /// Get or create a player for the given URL.
   ///
   /// If a player already exists for this URL, it is returned and marked
-  /// as recently used. Otherwise, an idle player is reused if available,
-  /// or a new player is created. If the pool is at capacity, the least
-  /// recently used player is recycled first.
+  /// as recently used. Otherwise, a new player is created. If the pool
+  /// is at capacity, the least recently used player is evicted first.
   Future<PooledPlayer> getPlayer(String url) async {
     if (_isDisposed) {
       throw StateError('PlayerPool has been disposed');
     }
 
-    // Check if player already exists (cache hit)
+    // Check if player already exists
     if (_players.containsKey(url)) {
       _touch(url);
       return _players[url]!;
     }
 
-    // Recycle LRU if at capacity (moves to idle, no native disposal)
+    // Evict if at capacity
     while (_players.length >= maxPlayers && _lruOrder.isNotEmpty) {
-      await _recycleLru();
+      await _evictLru();
     }
 
-    // Reuse an idle player if available (avoids native player creation)
-    final player =
-        _idle.isNotEmpty ? _idle.removeLast() : await _createPlayer();
+    // Create new player
+    final player = await _createPlayer();
     _players[url] = player;
     _lruOrder.add(url);
 
@@ -225,39 +217,18 @@ class PlayerPool {
       ..add(url);
   }
 
-  /// Recycle the least recently used player to the idle list.
-  ///
-  /// Stops the player's media but keeps native resources alive for reuse.
-  Future<void> _recycleLru() async {
+  /// Evict the least recently used player.
+  Future<void> _evictLru() async {
     if (_lruOrder.isEmpty) return;
 
     final url = _lruOrder.removeAt(0);
     final player = _players.remove(url);
     if (player != null && !player.isDisposed) {
-      await player.player.stop();
-      _idle.add(player);
+      await player.dispose();
     }
   }
 
-  /// Recycle a specific URL's player to the idle list.
-  ///
-  /// Stops the player's media but keeps native resources alive for reuse.
-  /// Use this when a video leaves the preload window during scrolling.
-  ///
-  /// For permanent disposal (e.g., when leaving a screen), use [release].
-  Future<void> recycle(String url) async {
-    final player = _players.remove(url);
-    _lruOrder.remove(url);
-    if (player != null && !player.isDisposed) {
-      await player.player.stop();
-      _idle.add(player);
-    }
-  }
-
-  /// Release a specific URL from the pool, disposing native resources.
-  ///
-  /// Use this for permanent cleanup (e.g., when leaving a screen).
-  /// For temporary release during scrolling, prefer [recycle].
+  /// Release a specific URL from the pool.
   Future<void> release(String url) async {
     final player = _players.remove(url);
     _lruOrder.remove(url);
@@ -266,17 +237,16 @@ class PlayerPool {
     }
   }
 
-  /// Dispose all players (active and idle) and clear the pool.
+  /// Dispose all players and clear the pool.
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
 
-    final allPlayers = [..._players.values, ..._idle];
+    final players = _players.values.toList();
     _players.clear();
-    _idle.clear();
     _lruOrder.clear();
 
-    for (final player in allPlayers) {
+    for (final player in players) {
       if (!player.isDisposed) {
         await player.dispose();
       }

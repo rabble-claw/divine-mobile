@@ -265,7 +265,7 @@ void main() {
           expect(createdPlayers.length, equals(3));
         });
 
-        test('recycles LRU player when at capacity', () async {
+        test('evicts LRU player when at capacity', () async {
           await pool.getPlayer('https://example.com/v1.mp4');
           await pool.getPlayer('https://example.com/v2.mp4');
           await pool.getPlayer('https://example.com/v3.mp4');
@@ -277,36 +277,16 @@ void main() {
           expect(pool.hasPlayer('https://example.com/v4.mp4'), isTrue);
         });
 
-        test('stops recycled player instead of disposing', () async {
+        test('disposes evicted player', () async {
           await pool.getPlayer('https://example.com/v1.mp4');
           await pool.getPlayer('https://example.com/v2.mp4');
           await pool.getPlayer('https://example.com/v3.mp4');
 
-          final recycledPlayer = createdPlayers[0];
+          final evictedPlayer = createdPlayers[0];
 
           await pool.getPlayer('https://example.com/v4.mp4');
 
-          // Lambda required: mocktail needs chained call inside verify closure.
-          // ignore: unnecessary_lambdas
-          verify(() => recycledPlayer.player.stop()).called(1);
-          verifyNever(recycledPlayer.dispose);
-        });
-
-        test('reuses idle player instead of creating new one', () async {
-          await pool.getPlayer('https://example.com/v1.mp4');
-          await pool.getPlayer('https://example.com/v2.mp4');
-          await pool.getPlayer('https://example.com/v3.mp4');
-
-          // v1 gets recycled to idle
-          await pool.getPlayer('https://example.com/v4.mp4');
-
-          final countAfterRecycle = createdPlayers.length;
-
-          // v2 gets recycled, idle player (v1) is reused for v5
-          await pool.getPlayer('https://example.com/v5.mp4');
-
-          // No new player should have been created
-          expect(createdPlayers.length, equals(countAfterRecycle));
+          verify(evictedPlayer.dispose).called(1);
         });
       });
 
@@ -443,8 +423,8 @@ void main() {
         });
       });
 
-      group('LRU recycling', () {
-        test('recycles oldest player first', () async {
+      group('LRU eviction', () {
+        test('evicts oldest player first', () async {
           await pool.getPlayer('https://example.com/v1.mp4');
           await pool.getPlayer('https://example.com/v2.mp4');
           await pool.getPlayer('https://example.com/v3.mp4');
@@ -465,14 +445,14 @@ void main() {
           // Touch v1 to move it to end
           await pool.getPlayer('https://example.com/v1.mp4');
 
-          // v2 should be recycled now, not v1
+          // v2 should be evicted now, not v1
           await pool.getPlayer('https://example.com/v4.mp4');
 
           expect(pool.hasPlayer('https://example.com/v1.mp4'), isTrue);
           expect(pool.hasPlayer('https://example.com/v2.mp4'), isFalse);
         });
 
-        test('correct recycling order with multiple players', () async {
+        test('correct eviction order with multiple players', () async {
           await pool.getPlayer('https://example.com/v1.mp4');
           await pool.getPlayer('https://example.com/v2.mp4');
           await pool.getPlayer('https://example.com/v3.mp4');
@@ -493,7 +473,7 @@ void main() {
       });
 
       group('dispose', () {
-        test('disposes all active players', () async {
+        test('disposes all players', () async {
           await pool.getPlayer('https://example.com/v1.mp4');
           await pool.getPlayer('https://example.com/v2.mp4');
 
@@ -502,23 +482,6 @@ void main() {
           for (final player in createdPlayers) {
             verify(player.dispose).called(1);
           }
-        });
-
-        test('disposes idle players too', () async {
-          await pool.getPlayer('https://example.com/v1.mp4');
-          await pool.getPlayer('https://example.com/v2.mp4');
-
-          // Recycle v1 to idle
-          await pool.recycle('https://example.com/v1.mp4');
-          expect(pool.idleCount, equals(1));
-
-          await pool.dispose();
-
-          // Both active (v2) and idle (v1) should be disposed
-          for (final player in createdPlayers) {
-            verify(player.dispose).called(1);
-          }
-          expect(pool.idleCount, equals(0));
         });
 
         test('clears player count', () async {
@@ -553,102 +516,6 @@ void main() {
         });
       });
 
-      group('recycle', () {
-        test('removes player from active pool', () async {
-          await pool.getPlayer('https://example.com/v1.mp4');
-
-          await pool.recycle('https://example.com/v1.mp4');
-
-          expect(pool.hasPlayer('https://example.com/v1.mp4'), isFalse);
-          expect(pool.playerCount, equals(0));
-        });
-
-        test('stops player media', () async {
-          await pool.getPlayer('https://example.com/v1.mp4');
-          final player = createdPlayers[0];
-
-          await pool.recycle('https://example.com/v1.mp4');
-
-          // Lambda required: mocktail needs chained call inside verify closure.
-          // ignore: unnecessary_lambdas
-          verify(() => player.player.stop()).called(1);
-        });
-
-        test('adds player to idle list', () async {
-          await pool.getPlayer('https://example.com/v1.mp4');
-
-          await pool.recycle('https://example.com/v1.mp4');
-
-          expect(pool.idleCount, equals(1));
-        });
-
-        test('does not dispose player', () async {
-          await pool.getPlayer('https://example.com/v1.mp4');
-          final player = createdPlayers[0];
-
-          await pool.recycle('https://example.com/v1.mp4');
-
-          verifyNever(player.dispose);
-        });
-
-        test('does nothing for unknown URL', () async {
-          await expectLater(
-            pool.recycle('https://example.com/unknown.mp4'),
-            completes,
-          );
-          expect(pool.idleCount, equals(0));
-        });
-
-        test('skips already disposed player', () async {
-          await pool.getPlayer('https://example.com/v1.mp4');
-
-          when(() => createdPlayers[0].isDisposed).thenReturn(true);
-
-          await pool.recycle('https://example.com/v1.mp4');
-
-          verifyNever(() => createdPlayers[0].player.stop());
-          expect(pool.idleCount, equals(0));
-        });
-      });
-
-      group('idleCount', () {
-        test('returns 0 initially', () {
-          expect(pool.idleCount, equals(0));
-        });
-
-        test('increments when player is recycled', () async {
-          await pool.getPlayer('https://example.com/v1.mp4');
-
-          await pool.recycle('https://example.com/v1.mp4');
-
-          expect(pool.idleCount, equals(1));
-        });
-
-        test('decrements when idle player is reused', () async {
-          await pool.getPlayer('https://example.com/v1.mp4');
-          await pool.getPlayer('https://example.com/v2.mp4');
-          await pool.getPlayer('https://example.com/v3.mp4');
-
-          // Recycle v1 to idle
-          await pool.recycle('https://example.com/v1.mp4');
-          expect(pool.idleCount, equals(1));
-
-          // Getting a new URL should reuse idle player
-          await pool.getPlayer('https://example.com/v4.mp4');
-
-          expect(pool.idleCount, equals(0));
-        });
-
-        test('returns 0 after dispose', () async {
-          await pool.getPlayer('https://example.com/v1.mp4');
-          await pool.recycle('https://example.com/v1.mp4');
-
-          await pool.dispose();
-
-          expect(pool.idleCount, equals(0));
-        });
-      });
-
       group('release with disposed player', () {
         test('skips disposing already disposed player', () async {
           await pool.getPlayer('https://example.com/v1.mp4');
@@ -662,9 +529,9 @@ void main() {
         });
       });
 
-      group('recycling with disposed player', () {
+      group('eviction with disposed player', () {
         test(
-          'skips adding disposed player to idle during LRU recycling',
+          'skips disposing already disposed player during eviction',
           () async {
             await pool.getPlayer('https://example.com/v1.mp4');
             await pool.getPlayer('https://example.com/v2.mp4');
@@ -674,10 +541,8 @@ void main() {
 
             await pool.getPlayer('https://example.com/v4.mp4');
 
-            // v1 removed from active but NOT added to idle
+            verifyNever(() => createdPlayers[0].dispose());
             expect(pool.hasPlayer('https://example.com/v1.mp4'), isFalse);
-            expect(pool.idleCount, equals(0));
-            verifyNever(() => createdPlayers[0].player.stop());
           },
         );
       });
