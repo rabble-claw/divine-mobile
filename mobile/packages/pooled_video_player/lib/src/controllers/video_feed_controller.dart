@@ -431,6 +431,14 @@ class VideoFeedController extends ChangeNotifier {
     _stopPositionTimer(index);
     unawaited(_bufferSubscriptions[index]?.cancel());
     _bufferSubscriptions.remove(index);
+
+    // Release from pool to free capacity for new videos during scrolling.
+    // Without this, orphaned players accumulate in the pool and starve
+    // new videos of player slots.
+    if (index >= 0 && index < _videos.length) {
+      unawaited(pool.release(_videos[index].url));
+    }
+
     _loadedPlayers.remove(index);
     _loadStates.remove(index);
     _loadingIndices.remove(index);
@@ -442,11 +450,12 @@ class VideoFeedController extends ChangeNotifier {
     if (_isDisposed) return;
     _isDisposed = true;
 
-    // Release all players back to pool (stops playback and removes from pool)
-    // This ensures clean state when videos are reopened.
-    for (var i = 0; i < _videos.length; i++) {
-      if (_loadedPlayers.containsKey(i)) {
-        unawaited(pool.release(_videos[i].url));
+    // Release remaining loaded players back to pool.
+    // Players outside the preload window are already released by
+    // _releasePlayer(), so only the current window remains.
+    for (final entry in _loadedPlayers.entries) {
+      if (entry.key >= 0 && entry.key < _videos.length) {
+        unawaited(pool.release(_videos[entry.key].url));
       }
     }
 

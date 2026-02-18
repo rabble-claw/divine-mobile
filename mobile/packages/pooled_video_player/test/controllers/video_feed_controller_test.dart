@@ -890,6 +890,107 @@ void main() {
       });
     });
 
+    group('player release during scrolling', () {
+      test(
+        'releases players from pool when they leave preload window',
+        () async {
+          final releasedUrls = <String>[];
+
+          final trackingPool = _TrackingPlayerPool(
+            maxPlayers: 10,
+            mockPlayerFactory: (url) {
+              final setup = createMockPlayerSetup();
+              final mockPooledPlayer = _MockPooledPlayer();
+              when(() => mockPooledPlayer.player).thenReturn(setup.player);
+              when(
+                () => mockPooledPlayer.videoController,
+              ).thenReturn(createMockVideoController());
+              when(() => mockPooledPlayer.isDisposed).thenReturn(false);
+              when(mockPooledPlayer.dispose).thenAnswer((_) async {});
+              return mockPooledPlayer;
+            },
+            onRelease: releasedUrls.add,
+          );
+
+          // 10 videos, preloadAhead=1, preloadBehind=0
+          // At index 0: window = [0, 1]
+          final videos = createTestVideos(count: 10);
+          final controller = VideoFeedController(
+            videos: videos,
+            pool: trackingPool,
+            preloadAhead: 1,
+            preloadBehind: 0,
+          );
+
+          // Wait for initial load (indices 0, 1)
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          releasedUrls.clear();
+
+          // Scroll to index 3: window = [3, 4]
+          // Indices 0 and 1 should be released from pool
+          controller.onPageChanged(3);
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+
+          expect(releasedUrls, contains(videos[0].url));
+          expect(releasedUrls, contains(videos[1].url));
+          expect(releasedUrls, isNot(contains(videos[3].url)));
+          expect(releasedUrls, isNot(contains(videos[4].url)));
+
+          controller.dispose();
+        },
+      );
+
+      test(
+        'frees pool capacity so new videos can load during scrolling',
+        () async {
+          // Pool with only 3 slots — mimics resource-constrained scenario
+          final trackingPool = _TrackingPlayerPool(
+            maxPlayers: 3,
+            mockPlayerFactory: (url) {
+              final setup = createMockPlayerSetup();
+              final mockPooledPlayer = _MockPooledPlayer();
+              when(() => mockPooledPlayer.player).thenReturn(setup.player);
+              when(
+                () => mockPooledPlayer.videoController,
+              ).thenReturn(createMockVideoController());
+              when(() => mockPooledPlayer.isDisposed).thenReturn(false);
+              when(mockPooledPlayer.dispose).thenAnswer((_) async {});
+              return mockPooledPlayer;
+            },
+            onRelease: (_) {},
+          );
+
+          final videos = createTestVideos(count: 10);
+          final controller = VideoFeedController(
+            videos: videos,
+            pool: trackingPool,
+            preloadAhead: 1,
+            preloadBehind: 0,
+          );
+
+          // Wait for initial load
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+
+          // Scroll through several pages
+          for (var i = 1; i <= 8; i++) {
+            controller.onPageChanged(i);
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+          }
+
+          // Pool should never exceed maxPlayers
+          expect(trackingPool.playerCount, lessThanOrEqualTo(3));
+
+          // Current video (8) should still be loadable
+          expect(
+            controller.getLoadState(8),
+            isNot(equals(LoadState.none)),
+          );
+
+          controller.dispose();
+        },
+      );
+    });
+
     group('playback with loaded player', () {
       late VideoFeedController controller;
       late MockPlayerSetup playerSetup;
