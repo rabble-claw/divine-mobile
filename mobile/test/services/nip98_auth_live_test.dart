@@ -65,7 +65,7 @@ void main() {
       return base64Encode(utf8.encode(jsonEncode(event.toJson())));
     }
 
-    test('WITH payload tag, no query params in u tag -> accepted', () async {
+    test('WITH payload tag, no query params in u tag -> rejected', () async {
       final url =
           'https://relay.divine.video/api/users/$publicKey/notifications';
       final token = createSignedToken(url: url, method: 'GET');
@@ -75,12 +75,13 @@ void main() {
       // ignore: avoid_print
       print('WITH payload, no query params: $status $body');
 
-      // 200 = empty notifications, 404 = user not found -> format accepted
-      // 401 = auth format rejected
+      // Relay strictly validates the u tag URL matches the full request URL
+      // including query params. A token signed without query params is rejected
+      // when the request includes ?limit=1.
       expect(
         status,
-        anyOf(200, 404),
-        reason: 'Format should be accepted, got $status: $body',
+        equals(401),
+        reason: 'Relay should reject URL mismatch, got $status: $body',
       );
     });
 
