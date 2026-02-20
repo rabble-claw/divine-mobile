@@ -40,13 +40,13 @@ class MyFollowingScreen extends ConsumerWidget {
   }
 }
 
-class _MyFollowingView extends StatelessWidget {
+class _MyFollowingView extends ConsumerWidget {
   const _MyFollowingView({required this.displayName});
 
   final String? displayName;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final appBarTitle = displayName?.isNotEmpty == true
         ? "$displayName's Following"
         : 'Following';
@@ -102,12 +102,18 @@ class _MyFollowingView extends StatelessWidget {
           }
         },
         builder: (context, state) {
+          // Watch blocklist to reactively filter blocked users from list
+          ref.watch(blocklistVersionProvider);
+          final blocklistService = ref.watch(contentBlocklistServiceProvider);
+
           return switch (state.status) {
             MyFollowingStatus.initial => const Center(
               child: CircularProgressIndicator(),
             ),
             MyFollowingStatus.success => _FollowingListBody(
-              following: state.followingPubkeys,
+              following: state.followingPubkeys
+                  .where((pk) => !blocklistService.isBlocked(pk))
+                  .toList(),
             ),
             MyFollowingStatus.failure => _FollowingErrorBody(
               onRetry: () {

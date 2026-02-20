@@ -17,7 +17,6 @@ import 'package:openvine/providers/route_feed_providers.dart';
 import 'package:openvine/router/router.dart';
 import 'package:openvine/screens/hashtag_screen_router.dart';
 import 'package:openvine/screens/pure/explore_video_screen_pure.dart';
-import 'package:openvine/services/content_blocklist_service.dart';
 import 'package:openvine/services/screen_analytics_service.dart';
 import 'package:openvine/mixins/grid_prefetch_mixin.dart';
 import 'package:openvine/utils/search_utils.dart';
@@ -174,7 +173,6 @@ class _SearchScreenPureState extends ConsumerState<SearchScreenPure>
       final videoEventService = ref.read(videoEventServiceProvider);
       final videos = videoEventService.discoveryVideos;
       final profileService = ref.read(userProfileServiceProvider);
-      final blocklistService = ref.read(contentBlocklistServiceProvider);
 
       Log.debug(
         '🔍 SearchScreenPure: Filtering ${videos.length} cached videos',
@@ -182,12 +180,9 @@ class _SearchScreenPureState extends ConsumerState<SearchScreenPure>
       );
 
       // Filter local videos based on search query
+      // Note: Blocked users' videos are NOT filtered from search results
+      // so users can navigate to blocked profiles and unblock them.
       final filteredVideos = videos.where((video) {
-        // Filter out blocked users first
-        if (blocklistService.shouldFilterFromFeeds(video.pubkey)) {
-          return false;
-        }
-
         final creatorName = profileService.getDisplayName(video.pubkey);
         final score = SearchUtils.matchVideo(
           query: query,
@@ -267,7 +262,6 @@ class _SearchScreenPureState extends ConsumerState<SearchScreenPure>
     });
 
     final querySnapshot = _currentQuery;
-    final blocklistService = ref.read(contentBlocklistServiceProvider);
 
     // Helper to check if this search is still valid
     bool isSearchStale() => !mounted || _searchGeneration != generation;
@@ -297,25 +291,17 @@ class _SearchScreenPureState extends ConsumerState<SearchScreenPure>
           limit: 100,
         );
 
-        // Filter out blocked users
-        final filteredRestResults = restResults
-            .where(
-              (video) => !blocklistService.shouldFilterFromFeeds(video.pubkey),
-            )
-            .toList();
-
-        if (filteredRestResults.isNotEmpty && !isSearchStale()) {
+        if (restResults.isNotEmpty && !isSearchStale()) {
           // Merge REST results with local results
           _mergeAndUpdateResults(
-            newVideos: filteredRestResults,
-            blocklistService: blocklistService,
+            newVideos: restResults,
             querySnapshot: querySnapshot,
             generation: generation,
           );
 
           Log.info(
             '🔍 SearchScreenPure: REST search returned '
-            '${filteredRestResults.length} results',
+            '${restResults.length} results',
             category: LogCategory.video,
           );
         }
@@ -345,17 +331,12 @@ class _SearchScreenPureState extends ConsumerState<SearchScreenPure>
         // Search external relays via NIP-50
         await videoEventService.searchVideos(querySnapshot, limit: 100);
 
-        final wsResults = videoEventService.searchResults
-            .where(
-              (video) => !blocklistService.shouldFilterFromFeeds(video.pubkey),
-            )
-            .toList();
+        final wsResults = videoEventService.searchResults;
 
         if (!isSearchStale()) {
           // Merge WebSocket results
           _mergeAndUpdateResults(
             newVideos: wsResults,
-            blocklistService: blocklistService,
             querySnapshot: querySnapshot,
             generation: generation,
           );
@@ -396,7 +377,6 @@ class _SearchScreenPureState extends ConsumerState<SearchScreenPure>
   /// from a previous search that completed after the user changed queries.
   void _mergeAndUpdateResults({
     required List<VideoEvent> newVideos,
-    required ContentBlocklistService blocklistService,
     required String querySnapshot,
     required int generation,
   }) {

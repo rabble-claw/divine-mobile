@@ -282,6 +282,14 @@ class MockContentBlocklistService extends _i1.Mock
           as bool);
 
   @override
+  bool hasBlockedUs(String? pubkey) =>
+      (super.noSuchMethod(
+            Invocation.method(#hasBlockedUs, [pubkey]),
+            returnValue: false,
+          )
+          as bool);
+
+  @override
   void blockUser(String? pubkey, {String? ourPubkey}) => super.noSuchMethod(
     Invocation.method(#blockUser, [pubkey], {#ourPubkey: ourPubkey}),
     returnValueForMissingStub: null,
@@ -323,6 +331,23 @@ class MockContentBlocklistService extends _i1.Mock
       (super.noSuchMethod(
             Invocation.method(#syncMuteListsInBackground, [
               nostrService,
+              ourPubkey,
+            ]),
+            returnValue: _i5.Future<void>.value(),
+            returnValueForMissingStub: _i5.Future<void>.value(),
+          )
+          as _i5.Future<void>);
+
+  @override
+  _i5.Future<void> syncBlockListsInBackground(
+    _i8.NostrClient? nostrService,
+    _i3.AuthService? authService,
+    String? ourPubkey,
+  ) =>
+      (super.noSuchMethod(
+            Invocation.method(#syncBlockListsInBackground, [
+              nostrService,
+              authService,
               ourPubkey,
             ]),
             returnValue: _i5.Future<void>.value(),

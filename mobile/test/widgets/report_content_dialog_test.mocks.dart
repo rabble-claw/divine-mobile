@@ -7,10 +7,11 @@ import 'dart:async' as _i3;
 
 import 'package:mockito/mockito.dart' as _i1;
 import 'package:nostr_client/nostr_client.dart' as _i6;
+import 'package:openvine/services/auth_service.dart' as _i7;
 import 'package:openvine/services/content_blocklist_service.dart' as _i5;
 import 'package:openvine/services/content_moderation_service.dart' as _i4;
 import 'package:openvine/services/content_reporting_service.dart' as _i2;
-import 'package:openvine/services/mute_service.dart' as _i7;
+import 'package:openvine/services/mute_service.dart' as _i8;
 
 // ignore_for_file: type=lint
 // ignore_for_file: avoid_redundant_argument_values
@@ -263,6 +264,14 @@ class MockContentBlocklistService extends _i1.Mock
           as bool);
 
   @override
+  bool hasBlockedUs(String? pubkey) =>
+      (super.noSuchMethod(
+            Invocation.method(#hasBlockedUs, [pubkey]),
+            returnValue: false,
+          )
+          as bool);
+
+  @override
   void blockUser(String? pubkey, {String? ourPubkey}) => super.noSuchMethod(
     Invocation.method(#blockUser, [pubkey], {#ourPubkey: ourPubkey}),
     returnValueForMissingStub: null,
@@ -312,6 +321,23 @@ class MockContentBlocklistService extends _i1.Mock
           as _i3.Future<void>);
 
   @override
+  _i3.Future<void> syncBlockListsInBackground(
+    _i6.NostrClient? nostrService,
+    _i7.AuthService? authService,
+    String? ourPubkey,
+  ) =>
+      (super.noSuchMethod(
+            Invocation.method(#syncBlockListsInBackground, [
+              nostrService,
+              authService,
+              ourPubkey,
+            ]),
+            returnValue: _i3.Future<void>.value(),
+            returnValueForMissingStub: _i3.Future<void>.value(),
+          )
+          as _i3.Future<void>);
+
+  @override
   void dispose() => super.noSuchMethod(
     Invocation.method(#dispose, []),
     returnValueForMissingStub: null,
@@ -321,50 +347,50 @@ class MockContentBlocklistService extends _i1.Mock
 /// A class which mocks [MuteService].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockMuteService extends _i1.Mock implements _i7.MuteService {
+class MockMuteService extends _i1.Mock implements _i8.MuteService {
   MockMuteService() {
     _i1.throwOnMissingStub(this);
   }
 
   @override
-  List<_i7.MuteItem> get mutedItems =>
+  List<_i8.MuteItem> get mutedItems =>
       (super.noSuchMethod(
             Invocation.getter(#mutedItems),
-            returnValue: <_i7.MuteItem>[],
+            returnValue: <_i8.MuteItem>[],
           )
-          as List<_i7.MuteItem>);
+          as List<_i8.MuteItem>);
 
   @override
-  List<_i7.MuteItem> get mutedUsers =>
+  List<_i8.MuteItem> get mutedUsers =>
       (super.noSuchMethod(
             Invocation.getter(#mutedUsers),
-            returnValue: <_i7.MuteItem>[],
+            returnValue: <_i8.MuteItem>[],
           )
-          as List<_i7.MuteItem>);
+          as List<_i8.MuteItem>);
 
   @override
-  List<_i7.MuteItem> get mutedHashtags =>
+  List<_i8.MuteItem> get mutedHashtags =>
       (super.noSuchMethod(
             Invocation.getter(#mutedHashtags),
-            returnValue: <_i7.MuteItem>[],
+            returnValue: <_i8.MuteItem>[],
           )
-          as List<_i7.MuteItem>);
+          as List<_i8.MuteItem>);
 
   @override
-  List<_i7.MuteItem> get mutedKeywords =>
+  List<_i8.MuteItem> get mutedKeywords =>
       (super.noSuchMethod(
             Invocation.getter(#mutedKeywords),
-            returnValue: <_i7.MuteItem>[],
+            returnValue: <_i8.MuteItem>[],
           )
-          as List<_i7.MuteItem>);
+          as List<_i8.MuteItem>);
 
   @override
-  List<_i7.MuteItem> get mutedThreads =>
+  List<_i8.MuteItem> get mutedThreads =>
       (super.noSuchMethod(
             Invocation.getter(#mutedThreads),
-            returnValue: <_i7.MuteItem>[],
+            returnValue: <_i8.MuteItem>[],
           )
-          as List<_i7.MuteItem>);
+          as List<_i8.MuteItem>);
 
   @override
   bool get isInitialized =>
@@ -446,7 +472,7 @@ class MockMuteService extends _i1.Mock implements _i7.MuteService {
 
   @override
   _i3.Future<bool> muteItem(
-    _i7.MuteType? type,
+    _i8.MuteType? type,
     String? value, {
     String? reason,
     Duration? duration,
@@ -462,7 +488,7 @@ class MockMuteService extends _i1.Mock implements _i7.MuteService {
           as _i3.Future<bool>);
 
   @override
-  _i3.Future<bool> unmuteItem(_i7.MuteType? type, String? value) =>
+  _i3.Future<bool> unmuteItem(_i8.MuteType? type, String? value) =>
       (super.noSuchMethod(
             Invocation.method(#unmuteItem, [type, value]),
             returnValue: _i3.Future<bool>.value(false),
@@ -554,7 +580,7 @@ class MockMuteService extends _i1.Mock implements _i7.MuteService {
           as bool);
 
   @override
-  _i3.Future<bool> importMuteList(List<_i7.MuteItem>? items) =>
+  _i3.Future<bool> importMuteList(List<_i8.MuteItem>? items) =>
       (super.noSuchMethod(
             Invocation.method(#importMuteList, [items]),
             returnValue: _i3.Future<bool>.value(false),
@@ -562,12 +588,12 @@ class MockMuteService extends _i1.Mock implements _i7.MuteService {
           as _i3.Future<bool>);
 
   @override
-  List<_i7.MuteItem> exportMuteList() =>
+  List<_i8.MuteItem> exportMuteList() =>
       (super.noSuchMethod(
             Invocation.method(#exportMuteList, []),
-            returnValue: <_i7.MuteItem>[],
+            returnValue: <_i8.MuteItem>[],
           )
-          as List<_i7.MuteItem>);
+          as List<_i8.MuteItem>);
 
   @override
   _i3.Future<bool> clearAllMutes() =>

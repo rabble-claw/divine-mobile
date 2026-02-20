@@ -51,13 +51,13 @@ class MyFollowersScreen extends ConsumerWidget {
   }
 }
 
-class _MyFollowersView extends StatelessWidget {
+class _MyFollowersView extends ConsumerWidget {
   const _MyFollowersView({required this.displayName});
 
   final String? displayName;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final appBarTitle = displayName?.isNotEmpty == true
         ? "$displayName's Followers"
         : 'Followers';
@@ -113,11 +113,17 @@ class _MyFollowersView extends StatelessWidget {
           }
         },
         builder: (context, state) {
+          // Watch blocklist to reactively filter blocked users from list
+          ref.watch(blocklistVersionProvider);
+          final blocklistService = ref.watch(contentBlocklistServiceProvider);
+
           return switch (state.status) {
             MyFollowersStatus.initial || MyFollowersStatus.loading =>
               const Center(child: CircularProgressIndicator()),
             MyFollowersStatus.success => _FollowersListBody(
-              followers: state.followersPubkeys,
+              followers: state.followersPubkeys
+                  .where((pk) => !blocklistService.isBlocked(pk))
+                  .toList(),
             ),
             MyFollowersStatus.failure => _FollowersErrorBody(
               onRetry: () {

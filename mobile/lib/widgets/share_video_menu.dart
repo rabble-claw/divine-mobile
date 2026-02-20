@@ -1109,6 +1109,7 @@ class _ShareVideoMenuState extends ConsumerState<ShareVideoMenu> {
   void _handleBlockUser(WidgetRef ref, bool currentlyBlocked) {
     final blocklistService = ref.read(contentBlocklistServiceProvider);
     final nostrClient = ref.read(nostrServiceProvider);
+    final followRepository = ref.read(followRepositoryProvider);
 
     if (currentlyBlocked) {
       // Unblock without confirmation
@@ -1138,12 +1139,19 @@ class _ShareVideoMenuState extends ConsumerState<ShareVideoMenu> {
               child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
             ),
             TextButton(
-              onPressed: () {
+              onPressed: () async {
                 blocklistService.blockUser(
                   widget.video.pubkey,
                   ourPubkey: nostrClient.publicKey,
                 );
-                context.pop();
+
+                // Unfollow the blocked user if currently following
+                if (followRepository != null &&
+                    followRepository.isFollowing(widget.video.pubkey)) {
+                  await followRepository.toggleFollow(widget.video.pubkey);
+                }
+
+                if (context.mounted) context.pop();
                 if (mounted) {
                   ScaffoldMessenger.of(
                     context,
@@ -2200,6 +2208,13 @@ class ReportContentDialogState extends ConsumerState<ReportContentDialog> {
               widget.video.pubkey,
               ourPubkey: nostrClient.publicKey,
             );
+
+            // 4. Unfollow the blocked user if currently following
+            final followRepository = ref.read(followRepositoryProvider);
+            if (followRepository != null &&
+                followRepository.isFollowing(widget.video.pubkey)) {
+              await followRepository.toggleFollow(widget.video.pubkey);
+            }
 
             Log.info(
               'User blocked with Nostr events: kind 1984 user report + kind 10000 mute list: ${widget.video.pubkey}',

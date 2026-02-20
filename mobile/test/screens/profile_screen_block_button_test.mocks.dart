@@ -7,6 +7,7 @@ import 'dart:async' as _i3;
 
 import 'package:mockito/mockito.dart' as _i1;
 import 'package:nostr_client/nostr_client.dart' as _i4;
+import 'package:openvine/services/auth_service.dart' as _i5;
 import 'package:openvine/services/content_blocklist_service.dart' as _i2;
 
 // ignore_for_file: type=lint
@@ -87,6 +88,14 @@ class MockContentBlocklistService extends _i1.Mock
           as bool);
 
   @override
+  bool hasBlockedUs(String? pubkey) =>
+      (super.noSuchMethod(
+            Invocation.method(#hasBlockedUs, [pubkey]),
+            returnValue: false,
+          )
+          as bool);
+
+  @override
   void blockUser(String? pubkey, {String? ourPubkey}) => super.noSuchMethod(
     Invocation.method(#blockUser, [pubkey], {#ourPubkey: ourPubkey}),
     returnValueForMissingStub: null,
@@ -128,6 +137,23 @@ class MockContentBlocklistService extends _i1.Mock
       (super.noSuchMethod(
             Invocation.method(#syncMuteListsInBackground, [
               nostrService,
+              ourPubkey,
+            ]),
+            returnValue: _i3.Future<void>.value(),
+            returnValueForMissingStub: _i3.Future<void>.value(),
+          )
+          as _i3.Future<void>);
+
+  @override
+  _i3.Future<void> syncBlockListsInBackground(
+    _i4.NostrClient? nostrService,
+    _i5.AuthService? authService,
+    String? ourPubkey,
+  ) =>
+      (super.noSuchMethod(
+            Invocation.method(#syncBlockListsInBackground, [
+              nostrService,
+              authService,
               ourPubkey,
             ]),
             returnValue: _i3.Future<void>.value(),
