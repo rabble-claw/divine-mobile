@@ -867,7 +867,6 @@ class ProfileViewSwitcher extends StatelessWidget {
             right: 16,
             child: Dismissible(
               key: ValueKey(firstFailed.draft.id),
-              direction: DismissDirection.horizontal,
               onDismissed: (_) {
                 if (failureCount == 1) {
                   backgroundPublishBloc.add(

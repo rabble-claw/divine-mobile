@@ -389,7 +389,7 @@ void main() {
           ],
         ),
         act: (bloc) => bloc.add(BackgroundPublishDismissAllFailed()),
-        expect: () => [BackgroundPublishState(uploads: [])],
+        expect: () => [const BackgroundPublishState()],
       );
 
       blocTest<BackgroundPublishBloc, BackgroundPublishState>(
