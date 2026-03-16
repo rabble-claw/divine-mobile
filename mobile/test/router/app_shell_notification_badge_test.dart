@@ -1,22 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:openvine/blocs/dm/unread_count/dm_unread_count_cubit.dart';
 import 'package:openvine/models/environment_config.dart';
 import 'package:openvine/providers/active_video_provider.dart';
 import 'package:openvine/providers/app_providers.dart';
 import 'package:openvine/providers/environment_provider.dart';
 import 'package:openvine/providers/relay_notifications_provider.dart';
+import 'package:openvine/repositories/dm_repository.dart';
 import 'package:openvine/router/router.dart';
 import 'package:openvine/services/auth_service.dart';
 import 'package:openvine/widgets/notification_badge.dart';
 
 class _MockAuthService extends Mock implements AuthService {}
 
+class _MockDmRepository extends Mock implements DmRepository {}
+
 Widget _buildSubject({
   required _MockAuthService mockAuthService,
+  required _MockDmRepository mockDmRepository,
   required int unreadCount,
 }) {
+  when(
+    () => mockDmRepository.watchUnreadAcceptedCount(),
+  ).thenAnswer((_) => Stream.value(0));
+
   return ProviderScope(
     overrides: [
       pageContextProvider.overrideWith(
@@ -32,17 +42,22 @@ Widget _buildSubject({
       ),
       relayNotificationUnreadCountProvider.overrideWithValue(unreadCount),
     ],
-    child: const MaterialApp(
-      home: AppShell(currentIndex: 0, child: SizedBox.shrink()),
+    child: BlocProvider(
+      create: (_) => DmUnreadCountCubit(dmRepository: mockDmRepository),
+      child: const MaterialApp(
+        home: AppShell(currentIndex: 0, child: SizedBox.shrink()),
+      ),
     ),
   );
 }
 
 void main() {
   late _MockAuthService mockAuthService;
+  late _MockDmRepository mockDmRepository;
 
   setUp(() {
     mockAuthService = _MockAuthService();
+    mockDmRepository = _MockDmRepository();
     when(() => mockAuthService.currentPublicKeyHex).thenReturn(null);
     when(() => mockAuthService.currentNpub).thenReturn(null);
     when(() => mockAuthService.isAuthenticated).thenReturn(false);
@@ -54,7 +69,11 @@ void main() {
       'renders $NotificationBadge on bell tab when unread count > 0',
       (tester) async {
         await tester.pumpWidget(
-          _buildSubject(mockAuthService: mockAuthService, unreadCount: 3),
+          _buildSubject(
+            mockAuthService: mockAuthService,
+            mockDmRepository: mockDmRepository,
+            unreadCount: 3,
+          ),
         );
         await tester.pump();
 
@@ -65,7 +84,11 @@ void main() {
 
     testWidgets('renders no badge when unread count is 0', (tester) async {
       await tester.pumpWidget(
-        _buildSubject(mockAuthService: mockAuthService, unreadCount: 0),
+        _buildSubject(
+          mockAuthService: mockAuthService,
+          mockDmRepository: mockDmRepository,
+          unreadCount: 0,
+        ),
       );
       await tester.pump();
 
